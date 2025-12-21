@@ -1,0 +1,21 @@
+((=- Custom template for NW-flex PDF generation -=))
+((=- Inherits from latex/index and overrides for smaller font and no prompts -=))
+((*- extends 'latex/index.tex.j2' -*))
+
+((*- block packages -*))
+    ((( super() )))
+    % Load fancyvrb options for smaller code
+    \usepackage{fvextra}
+((*- endblock packages -*))
+
+((*- block definitions -*))
+    ((( super() )))
+
+    % Use footnotesize font in all code blocks (smaller than default, larger than tiny)
+    \fvset{fontsize=\scriptsize}
+((*- endblock definitions -*))
+
+((*- block style_prompt -*))
+    % Empty prompt - removes In[]/Out[] labels
+    \newcommand{\prompt}[4]{}
+((*- endblock style_prompt -*))
