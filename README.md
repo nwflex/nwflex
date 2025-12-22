@@ -4,7 +4,7 @@
 
 **A generalized Needleman-Wunsch alignment algorithm with Extra Predecessors (EP) for flexible repeat-region alignment.**
 
-NW-flex extends classical sequence alignment to support flexible alignment of repetitive sequences, particularly short tandem repeats(STRs). By introducing configurable "extra predecessors" in the dynamic programming recurrence, NW-flex can skip over repeat units during alignment, enabling biologically meaningful alignments that standard algorithms cannot achieve.
+NW-flex extends classical sequence alignment to support flexible alignment of repetitive sequences, particularly short tandem repeats (STRs). By introducing configurable "extra predecessors" in the dynamic programming recurrence, NW-flex can skip over repeat units during alignment, enabling biologically meaningful alignments that standard algorithms cannot achieve.
 
 > **Paper**: *[Placeholder for manuscript link once submitted]*
 
@@ -140,7 +140,6 @@ nwflex/
 ├── notebooks/         # Educational notebooks
 ├── scripts/           # Figure generation scripts
 ├── tests/             # pytest test suite
-└── tex/               # LaTeX manuscript source
 ```
 
 ## Citation
