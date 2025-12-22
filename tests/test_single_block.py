@@ -115,7 +115,7 @@ class TestSingleBlockAlignmentValidity:
         s, e = 2, 6  # Block in the middle
         
         result = align_single_block(X, Y, s, e, **scoring_params)
-        valid, msg = check_alignment_validity(result)
+        valid, msg = check_alignment_validity(result, **scoring_params)
         assert valid, msg
 
     def test_random_alignment_validity(self, rng, random_dna_factory, scoring_params):
@@ -131,7 +131,7 @@ class TestSingleBlockAlignmentValidity:
             e = rng.integers(s + 1, nX)
             
             result = align_single_block(X, Y, s, e, **scoring_params)
-            valid, msg = check_alignment_validity(result)
+            valid, msg = check_alignment_validity(result, **scoring_params)
             assert valid, msg
 
 

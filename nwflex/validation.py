@@ -331,7 +331,11 @@ def check_AZB_case(
 # Alignment validity helper
 # ---------------------------------------------------------------------------
 
-def check_alignment_validity(result) -> Tuple[bool, str]:
+def check_alignment_validity(result, 
+                             score_matrix, 
+                             gap_open, 
+                             gap_extend, 
+                             alphabet_to_index) -> Tuple[bool, str]:
     """
     Check that an AlignmentResult has valid alignment strings.
     
@@ -353,15 +357,35 @@ def check_alignment_validity(result) -> Tuple[bool, str]:
     """
     X_aln = result.X_aln
     Y_aln = result.Y_aln
-    
+
+    computed_score = 0.0
+    in_x_gap = False
+    in_y_gap = False
+    for i, (x, y) in enumerate(zip(X_aln, Y_aln)):
+        if x == "-" and y == "-":
+            return False, f"Double gap found in alignment at position {i}"
+        elif x == "-":
+            computed_score += gap_extend if in_x_gap else gap_open
+            in_x_gap = True
+            in_y_gap = False
+        elif y == "-":
+            computed_score += gap_extend if in_y_gap else gap_open
+            in_y_gap = True
+            in_x_gap = False
+        else:
+            # Match/mismatch
+            xi = alphabet_to_index[x]
+            yj = alphabet_to_index[y]
+            computed_score += score_matrix[xi, yj]
+            in_x_gap = False
+            in_y_gap = False
+    # Check score matches
+    if not np.isclose(computed_score, result.score):
+        return False, f"Score mismatch: computed {computed_score}, reported {result.score}"
+
     # Check same length
     if len(X_aln) != len(Y_aln):
         return False, f"Length mismatch: X_aln={len(X_aln)}, Y_aln={len(Y_aln)}"
-    
-    # Check no double-gaps
-    for i, (x, y) in enumerate(zip(X_aln, Y_aln)):
-        if x == '-' and y == '-':
-            return False, f"Double gap at position {i}"
     
     return True, f"Valid alignment of length {len(X_aln)}"
 

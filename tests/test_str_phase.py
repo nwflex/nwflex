@@ -10,94 +10,41 @@ import numpy as np
 
 from nwflex.aligners import align_STR_block
 from nwflex.validation import check_alignment_validity, nwg_global
-from nwflex.repeats import phase_repeat
+from nwflex.repeats import STRLocus, phase_repeat
+
+A = "GATTACA"
+B = "ACATGAT"
+R = "CAA"
+N = 10
+M = 4
+
+strLocus = STRLocus(A=A, R=R, N=N, B=B)
 
 
 class TestSTRPhaseBasics:
     """Basic tests for STR phase alignment."""
 
     def test_perfect_repeat_alignment(self, scoring_params):
-        """Align a perfect repeat to itself."""
-        R = "CAG"
-        k = len(R)
-        num_repeats = 5
-        X = R * num_repeats  # "CAGCAGCAGCAGCAG"
-        Y = R * num_repeats
+        """Align a perfect repeat to itself."""        
         
         result = align_STR_block(
-            X=X,
-            Y=Y,
-            s=0,
-            e=len(X),
-            k=k,
+            strLocus=strLocus,            
+            Y=strLocus.X,
             **scoring_params,
         )
-        
-        # Perfect match should have high score
-        assert result.score > 0
-        valid, msg = check_alignment_validity(result)
-        assert valid, msg
-
-    def test_repeat_expansion(self, scoring_params):
-        """Y has more repeats than X (expansion)."""
-        R = "CAG"
-        k = len(R)
-        X = R * 3  # Reference: 3 repeats
-        Y = R * 5  # Read: 5 repeats
-        
-        result = align_STR_block(
-            X=X,
-            Y=Y,
-            s=0,
-            e=len(X),
-            k=k,
-            **scoring_params,
-        )
-        
-        valid, msg = check_alignment_validity(result)
+        valid, msg = check_alignment_validity(result, **scoring_params)
         assert valid, msg
 
     def test_repeat_contraction(self, scoring_params):
         """Y has fewer repeats than X (contraction)."""
-        R = "CAG"
-        k = len(R)
-        X = R * 5  # Reference: 5 repeats
-        Y = R * 3  # Read: 3 repeats
-        
+        Y = strLocus.build_locus_variant(a=0, b=0, M=4)                
         result = align_STR_block(
-            X=X,
+            strLocus=strLocus,            
             Y=Y,
-            s=0,
-            e=len(X),
-            k=k,
             **scoring_params,
         )
         
-        valid, msg = check_alignment_validity(result)
-        assert valid, msg
-
-    def test_flanking_regions(self, scoring_params):
-        """STR with flanking sequences."""
-        R = "AT"
-        k = len(R)
-        flank_L = "GGCC"
-        flank_R = "CCGG"
-        X = flank_L + R * 4 + flank_R
-        Y = flank_L + R * 6 + flank_R  # Expansion
-        
-        s = len(flank_L)
-        e = len(X) - len(flank_R)
-        
-        result = align_STR_block(
-            X=X,
-            Y=Y,
-            s=s,
-            e=e,
-            k=k,
-            **scoring_params,
-        )
-        
-        valid, msg = check_alignment_validity(result)
+        valid, msg = check_alignment_validity(result, **scoring_params)
         assert valid, msg
 
 
@@ -144,21 +91,15 @@ class TestSTRPhaseVsStandard:
 
     def test_no_worse_than_standard(self, scoring_params):
         """STR phase alignment should be >= standard alignment score."""
-        R = "CAG"
-        k = len(R)
-        X = R * 4
-        Y = R * 3  # Contraction
+        Y = strLocus.build_locus_variant(a=1, b=2, M=4)                
         
         result_phase = align_STR_block(
-            X=X,
+            strLocus=strLocus,
             Y=Y,
-            s=0,
-            e=len(X),
-            k=k,
             **scoring_params,
         )
         
-        score_standard = nwg_global(X, Y, **scoring_params)
+        score_standard = nwg_global(strLocus.X, Y, **scoring_params)
         
         # Flex should find at least as good an alignment
         assert result_phase.score >= score_standard, (
@@ -167,22 +108,15 @@ class TestSTRPhaseVsStandard:
 
     def test_benefits_from_flexibility(self, scoring_params):
         """Cases where flex should outperform standard alignment."""
-        R = "CAG"
-        k = len(R)
-        # X has 5 repeats, Y has 3 - standard alignment must pay gaps
-        X = R * 5
-        Y = R * 3
+        # X has 10 repeats, Y has 4 - standard alignment must pay gaps
+        Y = strLocus.build_locus_variant(a=0, b=0, M=4)
         
         result_phase = align_STR_block(
-            X=X,
+            strLocus=strLocus,
             Y=Y,
-            s=0,
-            e=len(X),
-            k=k,
             **scoring_params,
         )
-        
-        score_standard = nwg_global(X, Y, **scoring_params)
+        score_standard = nwg_global(strLocus.X, Y, **scoring_params)
         
         # With contraction, flex can skip repeats without gap penalty
         # Should be at least as good as standard
@@ -197,20 +131,14 @@ class TestSTRPhaseAlignmentValidity:
     @pytest.mark.parametrize("R", REPEAT_UNITS)
     def test_various_repeats(self, R, scoring_params):
         """Test alignment validity with various repeat units."""
-        k = len(R)
-        X = R * 4
-        Y = R * 5
-        
+        strLocus = STRLocus(A=A, R=R, N=N, B=B)
+        Y = strLocus.build_locus_variant(a=1, b=1, M=4)
         result = align_STR_block(
-            X=X,
+            strLocus,             
             Y=Y,
-            s=0,
-            e=len(X),
-            k=k,
             **scoring_params,
-        )
-        
-        valid, msg = check_alignment_validity(result)
+        )            
+        valid, msg = check_alignment_validity(result, **scoring_params)
         assert valid, f"Invalid alignment for R={R}: {msg}"
 
     def test_random_str_alignment(self, rng, scoring_params):
@@ -222,18 +150,13 @@ class TestSTRPhaseAlignmentValidity:
             k = len(R)
             n_ref = int(rng.integers(2, 8))
             n_read = int(rng.integers(2, 8))
-            
-            X = R * n_ref
-            Y = R * n_read
+            strLocus = STRLocus(A=A, R=R, N=n_ref, B=B)
+            Y = strLocus.build_locus_variant(a=0, b=0, M=n_read)
             
             result = align_STR_block(
-                X=X,
+                strLocus=strLocus,
                 Y=Y,
-                s=0,
-                e=len(X),
-                k=k,
                 **scoring_params,
             )
-            
-            valid, msg = check_alignment_validity(result)
+            valid, msg = check_alignment_validity(result, **scoring_params)
             assert valid, msg

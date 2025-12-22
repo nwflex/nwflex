@@ -19,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from nwflex.dp_core import AlignmentResult
+from nwflex.repeats import STRLocus
 
 from .dp_core import FlexInput, run_flex_dp
 from .ep_patterns import (
@@ -273,23 +274,21 @@ def align_single_block(
 # ---------------------------------------------------------------------------
 
 def align_STR_block(
-    X: str,
-    Y: str,
-    s: int,
-    e: int,
-    k: int,
-    score_matrix: NDArray[np.floating],
-    gap_open: float,
-    gap_extend: float,
-    alphabet_to_index: Mapping[str, int],
-    return_data: bool = False,
-) -> AlignmentResult:
+        strLocus: STRLocus,
+        Y: str,
+        score_matrix: NDArray[np.floating],
+        gap_open: float,
+        gap_extend: float,
+        alphabet_to_index: Mapping[str, int],
+        return_data: bool = False,
+    ) -> AlignmentResult:
     """
     Align (X, Y) with a single STR block Z = R^N of motif length k.
+    X, R, N and k are specified by the STRLocus object.
 
     The STR block is specified by (s, e, k):
 
-        s = |A|       leader row index
+        s = |A|       leader row index (determined by STRLocus)
         e = s + |Z|   end row of the repeat block (inclusive)
         k = |R|       motif length
 
@@ -298,11 +297,10 @@ def align_STR_block(
 
     Parameters
     ----------
-    X, Y : str
-        Reference and read sequences.
-
-    s, e, k : int
-        STR block configuration as above.
+    strLocus: STRLocus
+        The STR locus object specifying reference flanks, motif, and repeat count.
+    Y: str
+        The read sequence to be aligned.
 
     Other parameters
     ----------------
@@ -314,10 +312,13 @@ def align_STR_block(
     AlignmentResult
         Flex alignment specialized to the STR configuration.
     """
-    n = len(X)
-    EP = build_EP_STR_phase(n, s, e, k)
+    n = strLocus.n
+    EP = build_EP_STR_phase(strLocus.n, 
+                            strLocus.s, 
+                            strLocus.e, 
+                            strLocus.k)
     return align_with_EP(
-        X=X,
+        X=strLocus.X,
         Y=Y,
         score_matrix=score_matrix,
         gap_open=gap_open,

@@ -35,34 +35,59 @@ This compiles the Cython extension automatically.
 ## Quick Start
 
 ```python
-from nwflex.aligners import align_standard, align_single_block, align_STR_phase
+from nwflex.aligners import align_standard, align_single_block, align_STR_block
 from nwflex.validation import get_default_scoring
+from nwflex.repeats import STRLocus
+from nwflex.plot import plot_flex_matrices
+import matplotlib.pyplot as plt
 
 # Get default scoring parameters
 score_matrix, gap_open, gap_extend, a2i = get_default_scoring()
 
+# X = A · Z  · B where Z  spans positions [s, e)
+# Y = A · Z* · B where Z* is a substring of Z
+X = "ACGT" + "ATAT" + "GCTAC"
+Y = "ACGT" + "TA"   + "GCTAC"
+
 # Standard Needleman-Wunsch/Gotoh alignment (EP = ∅)
-result = align_standard("ACGTACGT", "ACGTGT", score_matrix, gap_open, gap_extend, a2i)
+result = align_standard(X, Y, score_matrix, gap_open, gap_extend, a2i)
 print(f"Score: {result.score}")
 print(f"X: {result.X_aln}")
 print(f"Y: {result.Y_aln}")
 
 # Single-block flex alignment
-# X = A·Z·B where Z spans positions [s, e)
-X = "ACGT" + "ATAT" + "GCTAC"  # A="ACGT", Z="ATAT", B="GCTAC"
-Y = "ACGTATGCTAC"
-s, e = 4, 8  # Block boundaries
+# end of A, start of B.
+s, e = 4, 8  
 result = align_single_block(X, Y, s, e, score_matrix, gap_open, gap_extend, a2i)
 print(f"Flex score: {result.score}, Jumps: {result.jumps}")
 
-# STR phase-aware alignment
-from nwflex.repeats import STRLocus
-locus = STRLocus(motif="CAG", left_flank="ATG", right_flank="TAA", M_ref=10)
-result = align_STR_phase(
-    locus.build_reference(),
-    "ATG" + "CAGCAGCAGCAGCAG" + "TAA",  # 5 CAG repeats
-    locus, score_matrix, gap_open, gap_extend, a2i
+# For an STR, 
+# X is A·(R)^N·B where R is the repeat unit
+# Build Y with M repeat units
+strLocus = STRLocus(A="ACGT", B="GCTAC", R="AT", N=10)
+Y = strLocus.build_locus_variant(a=0, b=0, M=5)
+# X = ACGT + (AT)10 + GCTAC
+# Y = ACGT + (AT)5 + GCTAC
+result = align_STR_block(
+    strLocus = strLocus,
+    Y = Y,
+    score_matrix = score_matrix,
+    gap_open = gap_open,
+    gap_extend = gap_extend,
+    alphabet_to_index = a2i,
+    return_data = True
 )
+## plot the matrices
+plot_flex_matrices(
+    result=result, 
+    X= strLocus.X,
+    Y= Y, 
+    s = strLocus.s, 
+    e = strLocus.e,
+    figsize=(20, 10)
+)
+plt.show()
+
 ```
 
 ## Documentation
@@ -139,7 +164,7 @@ nwflex/
 │   └── _cython/       # Cython source
 ├── notebooks/         # Educational notebooks
 ├── scripts/           # Figure generation scripts
-├── tests/             # pytest test suite
+└── tests/             # pytest test suite
 ```
 
 ## Citation

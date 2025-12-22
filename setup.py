@@ -31,6 +31,7 @@ setup(
         "seaborn",
         "cython",
         "pytest>=7.0",
+        "pytest-cov",
     ],
     extras_require={
         "notebooks": [
