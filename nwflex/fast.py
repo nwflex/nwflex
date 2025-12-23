@@ -16,11 +16,26 @@ It:
 
 import numpy as np
 
-from .dp_core import FlexInput, FlexData, traceback_alignment
+from .dp_core import FlexInput, FlexData, traceback_alignment, AlignmentResult
 from .ep_intervals import ep_to_intervals
-from ._cython.nwflex_dp import nwflex_dp_core
-from .dp_core import AlignmentResult
 
+try:
+    from ._cython.nwflex_dp import nwflex_dp_core
+    CYTHON_AVAILABLE = True
+except ImportError:    
+    nwflex_dp_core = None  # Placeholder to avoid NameError
+    CYTHON_AVAILABLE = False
+
+def _cython_not_available_error():
+    """Raise a helpful error if Cython extension is not available."""
+    raise ImportError(
+        "The Cython extension 'nwflex._cython.nwflex_dp' is not available.\n"
+        "This usually means the extension failed to compile during installation.\n\n"
+        "To fix this:\n"
+        "  1) Ensure a C compiler is installed (gcc, MSVC, etc.).\n"
+        "  2) Reinstall nwflex with pip install -e . --force-reinstall\n\n"
+        "Alternatively, use the pure-Python DP core via nwflex.dp_core import run_flex_dp"
+    )
 
 def _encode_sequence(seq: str, alphabet_to_index) -> np.ndarray:
     """
@@ -56,6 +71,9 @@ def run_flex_dp_fast(
           - data (FlexData or None)
           - path (list[(i,j,state)])
     """
+    ## check cython availability
+    if not CYTHON_AVAILABLE:
+        _cython_not_available_error()
     # Encode sequences as integer codes
     X_codes = _encode_sequence(config.X, config.alphabet_to_index)
     Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)

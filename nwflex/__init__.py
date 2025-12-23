@@ -23,7 +23,7 @@ from .dp_core import (
     run_flex_dp,
 )
 
-from .fast import run_flex_dp_fast
+from .fast import run_flex_dp_fast, CYTHON_AVAILABLE
 
 from .ep_patterns import (
     build_EP_standard,
@@ -109,6 +109,7 @@ __all__ = [
     "align_STR_block",
     "align_multi_STR",
     # DP core
+    "CYTHON_AVAILABLE",
     "FlexInput",
     "FlexData",
     "RowJump",
