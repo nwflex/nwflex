@@ -133,6 +133,7 @@ def count_valid_combinations(N: int, k: int) -> int:
 # PHASE INFERENCE FROM ALIGNMENT
 # ============================================================================
 
+
 def infer_abM_from_jumps(
     jumps: List[RowJump],
     s: int,
@@ -146,6 +147,12 @@ def infer_abM_from_jumps(
     extra predecessor (EP) edge. For an STR locus:
     - Entry jump: from leader row s into the block (determines a)
     - Exit jump: from inside block to closer row e+1 (determines b)
+
+    There are four cases:
+    - No jumps: a=0, b=0, M=N (exact match)
+    - Entry jump only: a is inferred, b=0, M is calculated
+    - Exit jump only: a=0, b is inferred, M=N-1
+    - Both jumps: a, b, M all inferred from jump positions
 
     Parameters
     ----------
@@ -161,8 +168,7 @@ def infer_abM_from_jumps(
     Returns
     -------
     tuple of (int or None, int or None, int or None)
-        Inferred (a, b, M) values, or (None, None, None) if jumps are
-        missing or invalid (e.g., if Z* is empty)
+        Inferred (a, b, M) values
 
     Notes
     -----
@@ -170,6 +176,8 @@ def infer_abM_from_jumps(
     - Entry at row i means we skip (i - s - 1) bases of the first motif
     - Exit at row i means we include ((i - s - 1) mod k + 1) bases of the last motif
     """
+    N = (e - s) // k  # Reference repeat count
+
     # Entry: jump from leader s into the block
     entry_row = next(
         (j.to_row for j in jumps if j.from_row == s and j.to_row > s),
@@ -181,9 +189,26 @@ def infer_abM_from_jumps(
         None
     )
 
-    if entry_row is None or exit_row is None:
-        return None, None, None
+    # Case 1: No jumps - exact match (a=0, b=0, M=N)
+    if entry_row is None and exit_row is None:
+        return 0, 0, N
 
+    # Case 2: Entry jump only (b=0, exit at block end)
+    if entry_row is not None and exit_row is None:
+        a_inf = (s + 1 - entry_row) % k
+        b_inf = 0
+        Zstar_len = e - entry_row + 1
+        M_inf = (Zstar_len - a_inf - b_inf) // k
+        return a_inf, b_inf, M_inf
+
+    # Case 3: Exit jump only (a=0, entry at block start)
+    if entry_row is None and exit_row is not None:
+        a_inf = 0
+        b_inf = (exit_row - e) % k
+        M_inf = N - 1
+        return a_inf, b_inf, M_inf
+
+    # Case 4: Both jumps
     if exit_row == s:
         return 0, 0, 0
 
@@ -296,6 +321,26 @@ class STRLocus:
             Valid (a, b, M) combinations satisfying M + 1_{a>0} + 1_{b>0} ≤ N
         """
         return valid_phase_combinations(self.N, self.k)
+    
+    def jumps_to_phase(
+        self,
+        jumps: List[RowJump]
+    ) -> Tuple[Optional[int], Optional[int], Optional[int]]:
+        """
+        Get the (a, b, M) phase parameters from entry/exit row jumps.
+
+        Parameters
+        ----------
+        jumps : list of RowJump
+            Row jumps from the alignment traceback
+
+        Returns
+        -------
+        tuple of (int or None, int or None, int or None)
+            Inferred (a, b, M) values, or (None, None, None) if jumps are
+            missing or invalid
+        """
+        return infer_abM_from_jumps(jumps, self.s, self.e, self.k)
 
     def __repr__(self) -> str:
         return (

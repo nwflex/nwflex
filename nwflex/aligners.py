@@ -34,6 +34,7 @@ from .ep_patterns import (
 # ---------------------------------------------------------------------------
 # Alignment expansion: insert gaps for jumped positions
 # ---------------------------------------------------------------------------
+
 def expand_alignment_with_jumps(X, Y, path, jumps):
     jump_dict = {jump.from_row: jump for jump in jumps}
     X_expand = []
@@ -97,6 +98,8 @@ def align_with_EP(
     gap_extend: float,
     alphabet_to_index: Mapping[str, int],
     extra_predecessors: Sequence[Sequence[int]],
+    free_X: bool = False,
+    free_Y: bool = False,
     return_data: bool = False,
 ) -> AlignmentResult:
     """
@@ -124,6 +127,10 @@ def align_with_EP(
         (rows 0..n), and E(i) ⊆ {0, ..., i-1}.  The baseline predecessor
         i-1 is implicit and should not be included (no harm but runtime.)
 
+    free_X: semiglobal in X (allow free gaps at the ends of X)
+
+    free_Y: semiglobal in Y (allow free gaps at the ends of Y)
+
     return_data : bool, default False
         If True, also return the full DP tables (FlexData).
 
@@ -141,6 +148,8 @@ def align_with_EP(
         gap_extend=gap_extend,
         extra_predecessors=extra_predecessors,
         alphabet_to_index=alphabet_to_index,
+        free_X=free_X,
+        free_Y=free_Y,
     )
     return run_flex_dp(config, return_data=return_data)
 
@@ -156,6 +165,8 @@ def align_standard(
     gap_open: float,
     gap_extend: float,
     alphabet_to_index: Mapping[str, int],
+    free_X: bool = False,
+    free_Y: bool = False,
     return_data: bool = False,
 ) -> AlignmentResult:
     """
@@ -174,6 +185,8 @@ def align_standard(
         gap_extend=gap_extend,
         alphabet_to_index=alphabet_to_index,
         extra_predecessors=EP,
+        free_X=free_X,
+        free_Y=free_Y,
         return_data=return_data,
     )
 
@@ -196,6 +209,9 @@ def align_semiglobal(
     This uses a single flexible block spanning the reference X, via
     build_EP_semiglobal(len(X)).  Intuitively, the entire reference is
     allowed to flex (act as the Z block) while the read Y remains global.
+
+    We do NOT turn on semi-global alignment intialization conditions.
+    This function is really for demonstration purposes.
     """
     n = len(X)
     EP = build_EP_semiglobal(n)
@@ -224,6 +240,8 @@ def align_single_block(
     gap_open: float,
     gap_extend: float,
     alphabet_to_index: Mapping[str, int],
+    free_X: bool = False,
+    free_Y: bool = False,
     return_data: bool = False,
 ) -> AlignmentResult:
     """
@@ -247,7 +265,7 @@ def align_single_block(
 
     Other parameters
     ----------------
-    score_matrix, gap_open, gap_extend, alphabet_to_index, return_data
+    score_matrix, gap_open, gap_extend, alphabet_to_index, return_data, free_X, free_Y
         As in align_with_EP.
 
     Returns
@@ -265,6 +283,8 @@ def align_single_block(
         gap_extend=gap_extend,
         alphabet_to_index=alphabet_to_index,
         extra_predecessors=EP,
+        free_X=free_X,
+        free_Y=free_Y,
         return_data=return_data,
     )
 
@@ -280,6 +300,8 @@ def align_STR_block(
         gap_open: float,
         gap_extend: float,
         alphabet_to_index: Mapping[str, int],
+        free_X: bool = False,
+        free_Y: bool = False,
         return_data: bool = False,
     ) -> AlignmentResult:
     """
@@ -304,7 +326,7 @@ def align_STR_block(
 
     Other parameters
     ----------------
-    score_matrix, gap_open, gap_extend, alphabet_to_index, return_data
+    score_matrix, gap_open, gap_extend, alphabet_to_index, return_data, free_X, free_Y
         As in align_with_EP.
 
     Returns
@@ -325,6 +347,8 @@ def align_STR_block(
         gap_extend=gap_extend,
         alphabet_to_index=alphabet_to_index,
         extra_predecessors=EP,
+        free_X=free_X,
+        free_Y=free_Y,
         return_data=return_data,
     )
 
@@ -337,6 +361,8 @@ def align_multi_STR(
     gap_open: float,
     gap_extend: float,
     alphabet_to_index: Mapping[str, int],
+    free_X: bool = False,
+    free_Y: bool = False,
     return_data: bool = False,
 ) -> AlignmentResult:
     """
@@ -356,7 +382,7 @@ def align_multi_STR(
 
     Other parameters
     ----------------
-    score_matrix, gap_open, gap_extend, alphabet_to_index, return_data
+    score_matrix, gap_open, gap_extend, alphabet_to_index, return_data, free_X, free_Y
         As in align_with_EP.
 
     Returns
@@ -374,5 +400,7 @@ def align_multi_STR(
         gap_extend=gap_extend,
         alphabet_to_index=alphabet_to_index,
         extra_predecessors=EP,
+        free_X=free_X,
+        free_Y=free_Y,
         return_data=return_data,
     )

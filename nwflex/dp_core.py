@@ -200,6 +200,32 @@ class AlignmentResult:
             return (self.score, self.X_aln, self.Y_aln, self.path, self.jumps, self.data)
         else:
             return (self.score, self.X_aln, self.Y_aln, self.path, self.jumps)
+    
+    def expanded_alignment(self, X, Y):
+        """
+        Return the full alignment with jumps as gaps.
+        Recalculates from original X and Y.
+        """
+        jump_dict = {jump.from_row: jump for jump in self.jumps}
+        X_expand = []
+        Y_expand = []
+        for i, j, s in self.path:
+            jump = jump_dict.get(i, None)
+            if s == 0:
+                X_expand.append("-")
+                Y_expand.append(Y[j-1])
+            elif s == 1:
+                X_expand.append(X[i-1])
+                Y_expand.append(Y[j-1])
+            else:
+                X_expand.append(X[i-1])
+                Y_expand.append("-")
+            if jump is not None:        
+                for i in range(jump.from_row + 1, jump.to_row):
+                    X_expand.append(X[i-1])
+                    Y_expand.append("-")
+                s = jump.state
+        return "".join(X_expand), "".join(Y_expand)
 
 # ---------------------------------------------------------------------------
 # Initialization

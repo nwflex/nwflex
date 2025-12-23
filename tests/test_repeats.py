@@ -119,24 +119,31 @@ class TestValidPhaseCombinations:
 class TestInferABMFromJumps:
     """Test phase inference from alignment row jumps."""
 
-    def test_no_jumps_returns_none(self):
-        """Empty jumps list returns (None, None, None)."""
+    def test_no_jumps_returns_exact_match(self):
+        """Empty jumps list returns (0, 0, N) for exact match."""
+        # s=5, e=15, k=3 => N = (15-5)//3 = 3
         result = infer_abM_from_jumps([], s=5, e=15, k=3)
-        assert result == (None, None, None)
+        assert result == (0, 0, 3)
 
-    def test_missing_entry_jump(self):
-        """Missing entry jump returns None."""
+    def test_exit_jump_only(self):
+        """Exit jump only infers a=0, b, M=N-1."""
         # Only exit jump, no entry
         jumps = [RowJump(from_row=10, to_row=16, col=5, state=1)]
-        result = infer_abM_from_jumps(jumps, s=5, e=15, k=3)
-        assert result == (None, None, None)
+        a, b, M = infer_abM_from_jumps(jumps, s=5, e=15, k=3)
+        # a=0, M=N-1=2
+        assert a == 0
+        assert M == 2
 
-    def test_missing_exit_jump(self):
-        """Missing exit jump returns None."""
-        # Only entry jump, no exit
+    def test_entry_jump_only(self):
+        """Entry jump only infers a and M with b=0."""
+        # Only entry jump, no exit - implies alignment continues to block end
+        # Entry from s=5 to row 8
         jumps = [RowJump(from_row=5, to_row=8, col=3, state=1)]
-        result = infer_abM_from_jumps(jumps, s=5, e=15, k=3)
-        assert result == (None, None, None)
+        a, b, M = infer_abM_from_jumps(jumps, s=5, e=15, k=3)
+        # Should return valid inference with b=0
+        assert b == 0
+        assert a is not None
+        assert M is not None
 
     def test_valid_jumps_infer_phase(self):
         """Valid entry and exit jumps produce phase inference."""
