@@ -104,11 +104,11 @@ locus = nw.STRLocus(
 # 2. Use default scoring model (match=5.0)
 score_matrix, gap_open, gap_extend, a2i = nw.get_default_scoring()
 
-# 3. Create a simulated read with fewer repeats (e.g., 6 copies instead of 10)
-Y = locus.build_locus_variant(a=0, b=0, M=3)  # A  + (R * 6) + B
+# 3. Create a simulated read with fewer repeats.
+#    In this case, 3 complete repeats.
+Y = locus.build_locus_variant(a=0, b=0, M=3)  
 
 # 4. Align the read using STR-aware NW-flex
-#    free_X and free_Y true for semiglobal
 result = nw.align_STR_block(
     strLocus=locus,
     Y=Y,
@@ -116,15 +116,16 @@ result = nw.align_STR_block(
     gap_open=gap_open,
     gap_extend=gap_extend,
     alphabet_to_index=a2i,
-    free_X=True,
-    free_Y=True
+    free_X=True, # semiglobal in X
+    free_Y=True  # semiglobal in Y
 )
 
-# alignment over best substring:
+# Alignment against best reference X*
 print("\nContracted alignment")
 print(result.X_aln, result.Y_aln, sep="\n")
 
-# expand to show full alignment
+# Full alignment to the reference X
+# i.e. jumps as gaps
 X_full, Y_full = result.expanded_alignment(locus.X, Y)
 a, b, M = locus.jumps_to_phase(result.jumps)
 
@@ -133,6 +134,20 @@ print(X_full, Y_full, sep="\n")
 print(f"\nAligned to repeat phase: (a={a}, b={b}, M={M})")
 print(f"Alignment score        : {result.score}")
 print(f"Perfect alignment      : {len(Y)*5.0}")
+```
+**Expected output**
+```
+Contracted alignment
+ATCGATCGCAGCAGCAGGTCAGTCA
+ATCGATCGCAGCAGCAGGTCAGTCA
+
+Expanded alignment
+ATCGATCGCAGCAGCAGCAGCAGCAGCAGCAGCAGCAGGTCAGTCA
+ATCGATCG---------------------CAGCAGCAGGTCAGTCA
+
+Aligned to repeat phase: (a=0, b=0, M=3)
+Alignment score        : 125.0
+Perfect alignment      : 125.0
 ```
 
 ### Optional Dependencies
@@ -198,7 +213,7 @@ The `notebooks/` directory contains a pedagogical series explaining NW-flex from
 | `05_NWflex_Cython.ipynb` | Cython acceleration and performance |
 | `06_NWflex_STR_locus.ipynb` | Simulating reads from STR loci and phase-aware alignment |
 
-A merged PDF can generated with the command 
+A merged PDF can be generated with the command 
 ```bash
 cd notebooks && ./build_pdf.sh
 ```
@@ -207,12 +222,12 @@ cd notebooks && ./build_pdf.sh
 
 | Module | Purpose |
 |--------|---------|
-| `aligners.py` | User-facing alignment functions (`align_standard`, `align_single_block`, `align_STR_block`, etc.) |
-| `dp_core.py` | Three-state Gotoh DP with row-wise extra predecessors. Core dataclasses: `FlexInput`, `FlexData`, `RowJump`, `AlignmentResult` |
-| `ep_patterns.py` | EP configuration builders: `build_EP_standard`, `build_EP_single_block`, `build_EP_STR_phase` |
-| `fast.py` | Cython-accelerated DP via `run_flex_dp_fast()` |
-| `repeats.py` | STR utilities: `phase_repeat`, `STRLocus`, `CompoundSTRLocus` |
-| `validation.py` | Baseline implementations for testing: `nwg_global`, `sflex_naive` |
+| `aligners.py` | User-facing alignment functions<br> (`align_standard`, `align_single_block`, `align_STR_block`, etc.) |
+| `dp_core.py` | Core alignment dataclasses:<br>`FlexInput`, `FlexData`, `RowJump`, `AlignmentResult` |
+| `ep_patterns.py` | EP configuration builders:<br> `build_EP_standard`, `build_EP_single_block`, `build_EP_STR_phase`, `build_EP_multi_STR` |
+| `fast.py` | Cython-accelerated DP via<br> `run_flex_dp_fast()` |
+| `repeats.py` | STR utilities:<br> `phase_repeat`, `STRLocus`, `CompoundSTRLocus` |
+| `validation.py` | Baseline implementations for testing:<br> `nwg_global`, `sflex_naive` |
 
 ## Testing
 
