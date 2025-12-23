@@ -75,28 +75,68 @@ from .nw_basics import (
     nw_gotoh_matrix,
 )
 
-from .nw_basics_plot import (
-    NWDagPlotter,
-    NWDagStyle,
-    draw_nw_dag,
-    visualize_cell_update,
-)
-
-
 # =============================================================================
-# PLOTTING
+# PLOTTING (requires both matplotlib and seaborn -- install with pip install nwflex[plot])
 # =============================================================================
+def _missing_plot_dep(func_name: str) -> ImportError:
+    return ImportError(
+        f"{func_name} requires plotting dependencies.\n"
+        'Install with: pip install "nwflex[plot]"'
+    )
 
-from .plot import (
-    draw_affine_k33_dag,
-    draw_flex_gadget,
-    draw_flex_dag,
-    plot_flex_matrices,
-    plot_gotoh_matrices,
-    plot_dag_with_ep_arcs,
-    plot_ep_pattern,
-    plot_score_system,
-)
+try:
+    from .nw_basics_plot import (
+        NWDagPlotter,
+        NWDagStyle,
+        draw_nw_dag,
+        visualize_cell_update,
+    )
+except ImportError:
+    # These will raise ImportError if accessed without matplotlib/seaborn
+    class NWDagPlotter:
+        def __init__(*args, **kwargs):
+            raise _missing_plot_dep("NWDagPlotter")
+    class NWDagStyle:
+        def __init__(*args, **kwargs):
+            raise _missing_plot_dep("NWDagStyle")
+    def draw_nw_dag(*args, **kwargs):
+        raise _missing_plot_dep("draw_nw_dag")
+    def visualize_cell_update(*args, **kwargs):
+        raise _missing_plot_dep("visualize_cell_update")
+
+
+
+try:
+    from .plot import (
+        draw_affine_k33_dag,
+        draw_flex_gadget,
+        draw_flex_dag,
+        plot_flex_matrices,
+        plot_gotoh_matrices,
+        plot_dag_with_ep_arcs,
+        plot_ep_pattern,
+        plot_score_system,
+    )
+    PLOT_AVAILABLE = True
+except ImportError:
+    # These will raise ImportError if accessed without matplotlib/seaborn
+    def draw_affine_k33_dag(*args, **kwargs):
+        raise _missing_plot_dep("draw_affine_k33_dag")
+    def draw_flex_gadget(*args, **kwargs):
+        raise _missing_plot_dep("draw_flex_gadget")
+    def draw_flex_dag(*args, **kwargs):
+        raise _missing_plot_dep("draw_flex_dag")
+    def plot_flex_matrices(*args, **kwargs):
+        raise _missing_plot_dep("plot_flex_matrices")
+    def plot_gotoh_matrices(*args, **kwargs):
+        raise _missing_plot_dep("plot_gotoh_matrices")
+    def plot_dag_with_ep_arcs(*args, **kwargs):
+        raise _missing_plot_dep("plot_dag_with_ep_arcs")
+    def plot_ep_pattern(*args, **kwargs):
+        raise _missing_plot_dep("plot_ep_pattern")
+    def plot_score_system(*args, **kwargs):
+        raise _missing_plot_dep("plot_score_system")
+    PLOT_AVAILABLE = False
 
 
 __all__ = [
@@ -147,6 +187,7 @@ __all__ = [
     "draw_nw_dag",
     "visualize_cell_update",
     # Plotting
+    "PLOT_AVAILABLE",
     "draw_affine_k33_dag",
     "draw_flex_gadget",
     "draw_flex_dag",

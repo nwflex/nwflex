@@ -51,6 +51,8 @@ from .utils import (
     draw_shortened_arrow,
     draw_highlighted_edge,
     draw_node_with_score,
+    path_to_alignment,
+    score_path,
 )
 
 
@@ -106,11 +108,6 @@ from .matrix import (
     draw_figure_row_highlights,
 )
 
-# Path utilities (from utils)
-from .utils import (
-    path_to_alignment,
-    score_path,
-)
 
 
 # =============================================================================

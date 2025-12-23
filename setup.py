@@ -21,26 +21,41 @@ setup(
     url="https://github.com/nwflex/nwflex",
     packages=find_packages(),
     ext_modules=cythonize(extensions, language_level=3),
+
     install_requires=[
-        "biopython",
-        "numpy",
-        "pandas",
-        "typing",
-        "tqdm",
-        "matplotlib",
-        "seaborn",
-        "cython",
-        "pytest>=7.0",
-        "pytest-cov",
+        "numpy"
     ],
     extras_require={
+        "plot": [
+            "matplotlib",
+            "seaborn",
+        ],
+        "dev": [
+            "pytest>=7.0",
+            "pytest-cov",
+        ],
         "notebooks": [
             "jupyter",            
             "nbconvert",
             "nbmerge",
             "nbformat",
+            "pandas",
+            "matplotlib",
+            "seaborn",
             "pandoc",
         ],
+        "all": [
+            "matplotlib",
+            "seaborn",
+            "pytest>=7.0",
+            "pytest-cov",
+            "jupyter",            
+            "nbconvert",
+            "nbmerge",
+            "nbformat",
+            "pandas",
+            "pandoc",
+        ]
     },
     classifiers=[
         "Programming Language :: Python :: 3",
