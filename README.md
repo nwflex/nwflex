@@ -18,7 +18,7 @@ NW-flex aligns reads without assuming a fixed number of repeats,
 finding an optimal alignment over all candidate repeat lengths
 in a single pass.
 
-> **Preprint**: link coming soon
+> **Preprint**: https://doi.org/10.64898/2025.12.22.695990
 
 ## Key Features
 
