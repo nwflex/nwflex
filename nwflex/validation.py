@@ -342,6 +342,8 @@ def check_alignment_validity(result,
     Verifies that X_aln and Y_aln:
     - Have the same length
     - Don't have simultaneous gaps at any position
+    - The reported alignment score matches the score recomputed from the alignment strings,
+       using the provided scoring parameters.
     
     Parameters
     ----------
