@@ -1,16 +1,15 @@
 """
-test_repeats.py — Tests for STR repeat utilities
+test_str.py — Tests for STR repeat utilities and STR alignment
 
-Tests the functions in nwflex.repeats:
-- phase_repeat: phased repeat string construction
-- valid_phase_combinations: enumeration of valid (a, b, M) tuples
-- count_valid_combinations: counting valid combinations
-- infer_abM_from_jumps: phase inference from alignment jumps
-- STRLocus: STR locus dataclass
-- CompoundSTRLocus: compound STR locus dataclass
+Combines:
+- Unit tests for repeats.py (phase_repeat, valid_phase_combinations, etc.)
+- Integration tests for STR alignment (align_STR_block)
+- Validation tests comparing against naive enumeration
 """
 
 import pytest
+import numpy as np
+
 from nwflex.repeats import (
     phase_repeat,
     valid_phase_combinations,
@@ -19,8 +18,12 @@ from nwflex.repeats import (
     STRLocus,
     CompoundSTRLocus,
 )
-from nwflex.dp_core import RowJump
+from nwflex.aligners import align_STR_block
+from nwflex.validation import check_alignment_validity, nwg_global
 
+# ===========================================================================
+# PART 1: Unit tests for repeat utilities
+# ===========================================================================
 
 class TestPhaseRepeat:
     """Test phase_repeat construction: Z* = suf(R,a) · R^M · pre(R,b)."""
@@ -114,56 +117,6 @@ class TestValidPhaseCombinations:
         N, k = 3, 3
         combos = list(valid_phase_combinations(N, k))
         assert len(combos) == len(set(combos)), "Duplicate combinations found"
-
-
-class TestInferABMFromJumps:
-    """Test phase inference from alignment row jumps."""
-
-    def test_no_jumps_returns_exact_match(self):
-        """Empty jumps list returns (0, 0, N) for exact match."""
-        # s=5, e=15, k=3 => N = (15-5)//3 = 3
-        result = infer_abM_from_jumps([], s=5, e=15, k=3)
-        assert result == (0, 0, 3)
-
-    def test_exit_jump_only(self):
-        """Exit jump only infers a=0, b, M=N-1."""
-        # Only exit jump, no entry
-        jumps = [RowJump(from_row=10, to_row=16, col=5, state=1)]
-        a, b, M = infer_abM_from_jumps(jumps, s=5, e=15, k=3)
-        # a=0, M=N-1=2
-        assert a == 0
-        assert M == 2
-
-    def test_entry_jump_only(self):
-        """Entry jump only infers a and M with b=0."""
-        # Only entry jump, no exit - implies alignment continues to block end
-        # Entry from s=5 to row 8
-        jumps = [RowJump(from_row=5, to_row=8, col=3, state=1)]
-        a, b, M = infer_abM_from_jumps(jumps, s=5, e=15, k=3)
-        # Should return valid inference with b=0
-        assert b == 0
-        assert a is not None
-        assert M is not None
-
-    def test_valid_jumps_infer_phase(self):
-        """Valid entry and exit jumps produce phase inference."""
-        # Construct jumps that should give known phases
-        s, e, k = 5, 14, 3  # Block from row 6 to 14, motif length 3
-        
-        # Entry from s=5 to row 8, exit from row 12 to e+1=15
-        entry_jump = RowJump(from_row=5, to_row=8, col=3, state=1)
-        exit_jump = RowJump(from_row=12, to_row=15, col=10, state=1)
-        jumps = [entry_jump, exit_jump]
-        
-        a, b, M = infer_abM_from_jumps(jumps, s=s, e=e, k=k)
-        
-        # Should return valid integers (not None)
-        assert a is not None
-        assert b is not None
-        assert M is not None
-        assert isinstance(a, int)
-        assert isinstance(b, int)
-        assert isinstance(M, int)
 
 
 class TestSTRLocus:
@@ -304,3 +257,124 @@ class TestCompoundSTRLocus:
         assert boundaries[0] == (1, 4, 1)   # A*3
         assert boundaries[1] == (4, 8, 2)   # TG*2
         assert boundaries[2] == (8, 11, 3)  # CAG*1
+
+
+# ===========================================================================
+# PART 2: STR alignment validation tests
+# ===========================================================================
+
+class TestSTRPhaseValidation:
+    """Validate STR alignment against naive enumeration of all (a,b,M) combinations."""
+    
+    # Test loci with different motifs and repeat counts
+    TEST_LOCI = [
+        ("GAG", "ACT", 4, "GTCA"),   # k=3, N=4
+        ("AA", "TG", 5, "CC"),        # k=2, N=5
+        ("TCA", "CAG", 3, "AC"),           # k=3, N=3
+    ]
+    
+    @pytest.mark.parametrize("A,R,N,B", TEST_LOCI)
+    def test_all_phase_combinations_score_correctly(self, A, R, N, B, scoring_params):
+        """
+        For each valid (a,b,M), verify NW-flex achieves perfect match score.
+        """
+        locus = STRLocus(A=A, R=R, N=N, B=B)
+        match_score = scoring_params["score_matrix"][0, 0]  # diagonal = match
+        
+        for a, b, M in locus.valid_combinations():
+            Y = locus.build_locus_variant(a=a, b=b, M=M)
+            expected_score = len(Y) * match_score
+            
+            result = align_STR_block(locus, Y, **scoring_params)
+            
+            assert result.score == expected_score, (
+                f"Score mismatch for (a={a}, b={b}, M={M}): "
+                f"expected {expected_score}, got {result.score}"
+            )
+    
+    @pytest.mark.parametrize("A,R,N,B", TEST_LOCI)
+    def test_inferred_abM_matches_input(self, A, R, N, B, scoring_params):
+        """
+        Verify that (a,b,M) inferred from alignment jumps matches input.
+        
+        This checks that the traceback correctly identifies which phase
+        combination was used in the optimal alignment.
+        """
+        locus = STRLocus(A=A, R=R, N=N, B=B)
+        
+        for a, b, M in locus.valid_combinations():
+            Y = locus.build_locus_variant(a=a, b=b, M=M)
+            
+            result = align_STR_block(locus, Y, **scoring_params, return_data=True)
+            a_inf, b_inf, M_inf = infer_abM_from_jumps(
+                result.jumps, locus.s, locus.e, locus.k
+            )
+            
+            assert (a_inf, b_inf, M_inf) == (a, b, M), (
+                f"Phase inference mismatch: input ({a}, {b}, {M}), "
+                f"inferred ({a_inf}, {b_inf}, {M_inf})"
+            )
+
+
+class TestSTRFlexVsNaive:
+    """Compare STR flex alignment to naive enumeration baseline."""
+    
+    def sflex_str_naive(self, locus: STRLocus, Y: str, **scoring_params) -> float:
+        """
+        Naive STR flex baseline: enumerate all valid (a,b,M) and return max NWG score.
+        
+        This is analogous to sflex_naive for single-block, but restricted to
+        phase-valid substrings of the repeat block.
+        """
+        best_score = -np.inf
+        
+        for a, b, M in locus.valid_combinations():
+            # Build effective reference with this phase combination
+            Zstar = phase_repeat(locus.R, a, b, M)
+            X_eff = locus.A + Zstar + locus.B
+            
+            score = nwg_global(X_eff, Y, **scoring_params)
+            best_score = max(best_score, score)
+        
+        return best_score
+    
+    def test_str_flex_matches_naive(self, rng, scoring_params):
+        """STR flex alignment matches naive enumeration on random Y."""
+        locus = STRLocus(A="GAG", R="ACT", N=5, B="GTCA")
+        
+        for _ in range(10):
+            # Generate random Y (may not be a perfect locus variant)
+            len_Y = rng.integers(10, 25)
+            Y = "".join(rng.choice(list("ACGT"), size=len_Y))
+            
+            flex_result = align_STR_block(locus, Y, **scoring_params)
+            naive_score = self.sflex_str_naive(locus, Y, **scoring_params)
+            
+            assert flex_result.score == naive_score, (
+                f"STR flex vs naive mismatch: flex={flex_result.score}, naive={naive_score}"
+            )
+
+
+class TestSTRAlignmentValidity:
+    """Validate alignment strings from STR mode."""
+    
+    def test_alignment_strings_valid(self, scoring_params):
+        """STR alignments produce valid strings."""
+        locus = STRLocus(A="GATTACA", R="CAA", N=10, B="ACATGAT")
+        Y = locus.build_locus_variant(a=0, b=0, M=4)
+        
+        result = align_STR_block(locus, Y, **scoring_params)
+        valid, msg = check_alignment_validity(result, **scoring_params)
+        assert valid, msg
+
+    def test_flex_score_geq_standard(self, scoring_params):
+        """STR flex score should be >= standard NWG score."""
+        locus = STRLocus(A="GATTACA", R="CAA", N=10, B="ACATGAT")
+        Y = locus.build_locus_variant(a=1, b=2, M=4)
+        
+        result = align_STR_block(locus, Y, **scoring_params)
+        standard_score = nwg_global(locus.X, Y, **scoring_params)
+        
+        assert result.score >= standard_score, (
+            f"STR flex score {result.score} < standard NWG score {standard_score}"
+        )

@@ -6,9 +6,8 @@ Needleman-Wunsch/Gotoh baseline implementation.
 """
 
 import pytest
-import numpy as np
 
-from nwflex.validation import check_standard_vs_nwg, nwg_global
+from nwflex.validation import check_standard_vs_nwg, check_alignment_validity
 from nwflex.aligners import align_standard
 
 
@@ -56,19 +55,6 @@ class TestStandardVsNWG:
 class TestAlignmentValidity:
     """Test that standard alignments produce valid alignment strings."""
 
-    def test_alignment_lengths_match(self, scoring_params):
-        """X_aln and Y_aln have the same length."""
-        X, Y = "ACGTACGT", "ACGACG"
-        result = align_standard(X, Y, **scoring_params)
-        assert len(result.X_aln) == len(result.Y_aln)
-
-    def test_no_double_gaps(self, scoring_params):
-        """No position has gaps in both X_aln and Y_aln."""
-        X, Y = "ACGTACGT", "ACGACG"
-        result = align_standard(X, Y, **scoring_params)
-        for i, (x, y) in enumerate(zip(result.X_aln, result.Y_aln)):
-            assert not (x == '-' and y == '-'), f"Double gap at position {i}"
-
     def test_ungapped_recovers_original(self, scoring_params):
         """Removing gaps from alignment recovers original sequences."""
         X, Y = "ACGTACGT", "ACGACG"
@@ -77,16 +63,55 @@ class TestAlignmentValidity:
         Y_recovered = result.Y_aln.replace('-', '')
         assert X_recovered == X, f"X mismatch: {X_recovered} != {X}"
         assert Y_recovered == Y, f"Y mismatch: {Y_recovered} != {Y}"
+    
+    def test_alignment_validity_checks(self, scoring_params):
+        """
+        Verify that align_standard produces alignment results that are:
+        1. The same length for X_aln and Y_aln,
+        2. Free of double gaps at any position,
+        3. Consistent between the reported score and the score recomputed from the alignment strings.
+
+        This test uses check_alignment_validity to confirm all three properties.
+        """
+        X, Y = "ACGTACGT", "ACGACG"
+        result = align_standard(X, Y, **scoring_params)
+        valid, msg = check_alignment_validity(result, **scoring_params)
+        assert valid, msg
 
     def test_random_alignment_validity(self, rng, random_dna_factory, scoring_params):
         """Random alignments produce valid strings."""
-        for _ in range(10):
+        for _ in range(20):
             X = random_dna_factory(20, rng)
             Y = random_dna_factory(20, rng)
             result = align_standard(X, Y, **scoring_params)
-            
-            assert len(result.X_aln) == len(result.Y_aln)
-            for i, (x, y) in enumerate(zip(result.X_aln, result.Y_aln)):
-                assert not (x == '-' and y == '-')
+            valid, msg = check_alignment_validity(result, **scoring_params)
             assert result.X_aln.replace('-', '') == X
             assert result.Y_aln.replace('-', '') == Y
+            assert valid, msg
+
+
+class TestScoringSchemeVariants:
+    """Test across different scoring schemes."""
+    
+    SCORING_VARIANTS = [
+        ("default", -20.0, -1.0),
+        ("smaller_gap_open", -10.0, -1.0),
+        ("larger_gap_extend", -20.0, -3.0),
+        ("balanced_gaps", -4.0, -4.0),
+    ]
+    
+    @pytest.mark.parametrize("name,gap_open,gap_extend", SCORING_VARIANTS)
+    def test_flex_matches_nwg_various_scoring(self, name, gap_open, gap_extend, 
+                                               score_matrix, alphabet_to_index, rng, random_dna_factory):
+        """NW-flex matches nwg_global across scoring schemes."""
+        for _ in range(20):
+            X = random_dna_factory(15, rng)
+            Y = random_dna_factory(15, rng)
+            flex_score, nwg_score = check_standard_vs_nwg(
+                X, Y,
+                score_matrix=score_matrix,
+                gap_open=gap_open,
+                gap_extend=gap_extend,
+                alphabet_to_index=alphabet_to_index,
+            )
+            assert flex_score == nwg_score , f"Mismatch under {name} scoring"

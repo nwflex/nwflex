@@ -7,7 +7,6 @@ where X = A·Z·B and Z* ranges over all contiguous substrings of Z.
 """
 
 import pytest
-import numpy as np
 
 from nwflex.validation import (
     check_single_block_case,
