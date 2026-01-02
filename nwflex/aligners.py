@@ -13,10 +13,12 @@ underlying Needleman-Wunsch/Gotoh recurrence.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence, Tuple, Optional
-
+from typing import Mapping, Sequence, Tuple, Set, Optional
+from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
+import re
+from itertools import groupby
 
 from nwflex.dp_core import AlignmentResult
 from nwflex.repeats import STRLocus
@@ -29,6 +31,103 @@ from .ep_patterns import (
     build_EP_multi_STR_phase,
     build_EP_semiglobal,
 )
+
+## stuff for CIGAR parsing and writing
+_CIGAR_RE = re.compile(r"(\d+)([MIDNSHP=X])")  # regex to parse CIGAR strings
+
+def _parse_cigar(cigar: str) -> Sequence[Tuple[int, str]]:
+    """Parse CIGAR string into list of (count, op) tuples."""
+    parts = [(int(n), op) for n, op in _CIGAR_RE.findall(cigar)]
+    ## rebuild to validate
+    if "".join(f"{n}{op}" for n, op in parts) != cigar:
+        raise ValueError(f"Invalid CIGAR: {cigar!r}")
+    return parts
+
+def _op_length_total(cigar: str, ops: Set[str]) -> int:
+    """Count number of bases in CIGAR for given operations."""
+    parts = _parse_cigar(cigar)
+    return sum(n for n, op in parts if op in ops)
+
+def _write_cigar(parts: Sequence[Tuple[int, str]]) -> str:
+    """Write CIGAR string from list of (count, op) tuples."""
+    return "".join(f"{n}{op}" for n, op in parts)
+
+
+def rle_ops(ops: str) -> list[tuple[str, int]]:
+    """Run-length encode CIGAR operations string."""
+    return [(sum(1 for _ in group), op) for op, group in groupby(ops)]
+
+
+def alignment_to_cigar(
+        path: Sequence[Tuple[int, int, int]],
+        lenX: Optional[int] = None,
+        lenY: Optional[int] = None,
+) -> Tuple[int, str]:
+    """
+    Convert an AlignmentResult path to a CIGAR string.
+
+    Parameters
+    ----------
+    path : sequence of (i, j, state)
+        Alignment path as returned in AlignmentResult.path.
+    
+    lenX, lenY : int
+        Lengths of the reference and read sequences.
+    If not provided, they are inferred from the path.
+
+    Returns
+    -------
+    start_index : int
+        Position of first aligned base
+
+    cigar : str
+        CIGAR string representing the alignment.
+    """
+    if lenX is None:
+        lenX = max(i for i, j, s in path)
+    if lenY is None:
+        lenY = max(j for i, j, s in path)        
+    pi = 0
+    cigar_states = []
+    start_pos = -1
+    for i, j, state in path:
+        ## skip leading deletions
+        if j == 0:
+            pi = i
+            continue
+        ## soft-clip leading insertions
+        if i == 0:
+            cigar_states.append('S')
+            continue
+        if j == lenY and state == 2:
+            break
+        ## the first algined base is the start position
+        if j == 1 and i > 0 and start_pos == -1:
+            start_pos = i    
+        ## if there was a jump, record Ns
+        if i - pi > 1:
+            cigar_states.extend(['N'] * (i - pi - 1))  
+        ## if there is a gap in X  
+        if state == 0:
+            ## if we are at the end of X, soft clip
+            ## otherwise, insertion
+            if i == lenX:
+                cigar_states.append('S')
+            else:
+                cigar_states.append('I')
+        elif state == 1:
+            ## match/mismatch
+            cigar_states.append('M')
+        else:
+            ## gap in Y
+            cigar_states.append('D')
+        pi= i
+
+    cigar_list = rle_ops(cigar_states)
+    cigar_str = _write_cigar(cigar_list)
+    return int(start_pos), cigar_str
+
+
 
 
 # ---------------------------------------------------------------------------
