@@ -102,7 +102,7 @@ def alignment_to_cigar(
         if j == lenY and state == 2:
             break
         ## the first algined base is the start position
-        if j == 1 and i > 0 and start_pos == -1:
+        if j > 0 and i > 0 and start_pos == -1:
             start_pos = i    
         ## if there was a jump, record Ns
         if i - pi > 1:
