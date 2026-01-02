@@ -13,6 +13,7 @@ from .aligners import (
     align_single_block,
     align_STR_block,
     align_multi_STR,
+    RefAligner,
 )
 
 from .dp_core import (
@@ -157,6 +158,7 @@ __all__ = [
     "align_single_block",
     "align_STR_block",
     "align_multi_STR",
+    "RefAligner",
     # DP core
     "CYTHON_AVAILABLE",
     "FlexInput",

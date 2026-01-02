@@ -13,7 +13,7 @@ underlying Needleman-Wunsch/Gotoh recurrence.
 
 from __future__ import annotations
 
-from typing import Mapping, Sequence, Tuple, Set, Optional
+from typing import Iterable, Mapping, Sequence, Tuple, Set, Optional
 from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
@@ -24,6 +24,8 @@ from nwflex.dp_core import AlignmentResult
 from nwflex.repeats import STRLocus
 
 from .dp_core import FlexInput, run_flex_dp
+from .fast import run_flex_dp_fast
+
 from .ep_patterns import (
     build_EP_standard,
     build_EP_single_block,
@@ -503,3 +505,88 @@ def align_multi_STR(
         free_Y=free_Y,
         return_data=return_data,
     )
+
+class RefAligner:
+    """
+    Given a common reference sequence X, scoring parameters, 
+    extra_predecessors, and alphabet, 
+    create an object that can align multiple reads Y1, Y2, ... against X.
+    """
+
+    def __init__(
+        self,
+        ref: str,
+        extra_predecessors: Sequence[Sequence[int]],
+        score_matrix: NDArray[np.floating],
+        gap_open: float,
+        gap_extend: float,
+        alphabet_to_index: Mapping[str, int],
+        free_X: bool = False,
+        free_Y: bool = False,
+        return_data: bool = False,
+        fast_mode: bool = False,
+    ):
+        self.config = dict()
+        self.config["X"] = ref
+        self.config["extra_predecessors"] = extra_predecessors                
+        self.config["score_matrix"]      = score_matrix
+        self.config["gap_open"]          = gap_open
+        self.config["gap_extend"]        = gap_extend
+        self.config["alphabet_to_index"] = alphabet_to_index
+        self.config["free_X"] = free_X
+        self.config["free_Y"] = free_Y
+        self.return_data = return_data
+        self.flex_dp = run_flex_dp_fast if fast_mode else run_flex_dp
+        self.reflen = len(ref)
+
+    def align(self, read: str) -> AlignmentResult:
+        """
+        Align a read Y against the reference X provided at initialization.
+        """
+        flex_input = FlexInput(**self.config, Y=read)
+        return self.flex_dp(
+            flex_input,
+            return_data=self.return_data,
+        )
+    
+    def align_batch(self, reads: Iterable[str]) -> Iterable[AlignmentResult]:
+        """
+        Align a batch of reads against the reference X provided at initialization.
+        """
+        for read in reads:
+            yield self.align(read)
+
+    def simple_output(self, result: AlignmentResult, readlen: Optional[int] = None) -> dict:
+        """
+        Convert an AlignmentResult into a simple dict with score and CIGAR.
+        """
+        start_pos, cigar = alignment_to_cigar(
+            result.path,
+            lenX=self.reflen,
+            lenY=readlen,
+        )
+        ## number of aligned bases in read
+        aligned_bases = _op_length_total(cigar, {'M'})        
+        return {
+            "score": result.score,
+            "aligned_bases": aligned_bases,
+            "start_pos": start_pos,
+            "cigar": cigar,
+        }
+
+    def align_simple(self, read: str) -> dict:
+        """
+        Align a read and return a simple dict with score and CIGAR.
+        """
+        result = self.align(read)
+        ans = self.simple_output(result, readlen=len(read))
+        return ans
+    
+    def align_batch_simple(self, reads: Iterable[str]) -> Iterable[dict]:
+        """
+        Align a batch of reads and return simple dicts with score and CIGAR.
+        """
+        for read in reads:
+            result = self.align(read)
+            ans = self.simple_output(result, readlen=len(read))
+            yield ans
