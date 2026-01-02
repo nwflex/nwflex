@@ -53,7 +53,7 @@ def _write_cigar(parts: Sequence[Tuple[int, str]]) -> str:
     return "".join(f"{n}{op}" for n, op in parts)
 
 
-def rle_ops(ops: str) -> list[tuple[str, int]]:
+def rle_ops(ops: str) -> Sequence[Tuple[int, str]]:
     """Run-length encode CIGAR operations string."""
     return [(sum(1 for _ in group), op) for op, group in groupby(ops)]
 

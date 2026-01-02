@@ -35,35 +35,17 @@ from .ep_patterns import build_EP_standard, build_EP_single_block
 from .aligners import align_standard, align_single_block
 from .dp_core import FlexInput, run_flex_dp
 from .fast import run_flex_dp_fast
+from . import default
 
 # ---------------------------------------------------------------------------
 # Default scoring and alphabet for tests and demos
 # ---------------------------------------------------------------------------
-
-DEFAULT_BASES = np.array(["A", "C", "G", "T"])
-DEFAULT_ALPHABET_TO_INDEX = {b: i for i, b in enumerate(DEFAULT_BASES)}
-
-# Simple match/mismatch matrix: +5 on the diagonal, -5 off-diagonal
-DEFAULT_SCORE_MATRIX = np.full((4, 4), -5.0, dtype=float)
-np.fill_diagonal(DEFAULT_SCORE_MATRIX, 5.0)
-
-DEFAULT_GAP_OPEN = -20.0
-DEFAULT_GAP_EXTEND = -1.0
-
-
-def get_default_scoring():
-    """
-    Convenience helper returning the default scoring components:
-
-        score_matrix, gap_open, gap_extend, alphabet_to_index
-    """
-    return (
-        DEFAULT_SCORE_MATRIX,
-        DEFAULT_GAP_OPEN,
-        DEFAULT_GAP_EXTEND,
-        DEFAULT_ALPHABET_TO_INDEX,
-    )
-
+# Use defaults from default.py
+DEFAULT_BASES = default.BASES
+DEFAULT_ALPHABET_TO_INDEX = default.ALPHABET_TO_INDEX
+DEFAULT_SCORE_MATRIX = default.SCORE_MATRIX
+DEFAULT_GAP_OPEN = default.GAP_OPEN
+DEFAULT_GAP_EXTEND = default.GAP_EXTEND
 
 def nwg_global(
     X: str,
@@ -421,7 +403,7 @@ def mutate_sequence(
     str
         Mutated sequence.
     """
-    bases = list("ACGT")
+    bases = default.BASES
     result = []
     
     for base in seq:

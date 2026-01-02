@@ -53,11 +53,11 @@ For additional functionality, see use the [Optional Dependencies](#optional-depe
 
 ## "Hello World."
 ```python
-from nwflex import get_default_scoring, align_standard, align_single_block
+from nwflex import default, align_standard, align_single_block
 
-score_matrix, gap_open, gap_extend, a2i = get_default_scoring()
-nw_result  = align_standard    ("ACGT", "AGT",       score_matrix, gap_open, gap_extend, a2i)
-nwf_result = align_single_block("ACGT", "AGT", 1, 4, score_matrix, gap_open, gap_extend, a2i)
+scoring_params = default.scoring_params()
+nw_result  = align_standard    ("ACGT", "AGT",       **scoring_params)
+nwf_result = align_single_block("ACGT", "AGT", 1, 4, **scoring_params)
 
 print("Standard NW:")
 print(f"Score: {nw_result.score}")   # -5.0
@@ -101,8 +101,8 @@ locus = nw.STRLocus(
     N=10,         # Reference repeat count (extra-roomy)
     B="GTCAGTCA", # Right flank (8 bp)
 )
-# 2. Use default scoring model (match=5.0)
-score_matrix, gap_open, gap_extend, a2i = nw.get_default_scoring()
+# 2. Use default scoring model (match=5.0) for semiglobal alignment
+scoring_params = nw.default.scoring_params(semiglobal=True)
 
 # 3. Create a simulated read with fewer repeats.
 #    In this case, 3 complete repeats.
@@ -112,12 +112,7 @@ Y = locus.build_locus_variant(a=0, b=0, M=3)
 result = nw.align_STR_block(
     strLocus=locus,
     Y=Y,
-    score_matrix=score_matrix,
-    gap_open=gap_open,
-    gap_extend=gap_extend,
-    alphabet_to_index=a2i,
-    free_X=True, # semiglobal in X
-    free_Y=True  # semiglobal in Y
+    **scoring_params
 )
 
 # Alignment against best reference X*

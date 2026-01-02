@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # Import from nwflex package
 from nwflex.ep_patterns import build_EP_single_block
 from nwflex.aligners import align_single_block, align_with_EP
-from nwflex.validation import get_default_scoring
+from nwflex.default import get_default_scoring
 from nwflex.repeats import phase_repeat
 from nwflex.plot import (
     plot_dag_with_ep_arcs,

@@ -37,11 +37,20 @@ from .ep_patterns import (
 
 
 # =============================================================================
-# VALIDATION AND TESTING
+# DEFAULTS, VALIDATION AND TESTING
 # =============================================================================
 
-from .validation import (
+from .default import (
+    BASES,
+    ALPHABET_TO_INDEX,
+    SCORE_MATRIX,
+    GAP_OPEN,
+    GAP_EXTEND,
+    align_params,
     get_default_scoring,
+)
+
+from .validation import (
     nwg_global,
     sflex_naive,
     check_standard_vs_nwg,
@@ -163,8 +172,10 @@ __all__ = [
     "build_EP_semiglobal",
     "union_EP_pair",
     "union_EP_sequence",
-    # Validation
+    # Default scoring
     "get_default_scoring",
+    "align_params",
+    # Validation
     "nwg_global",
     "sflex_naive",
     "check_standard_vs_nwg",
