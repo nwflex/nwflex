@@ -24,7 +24,7 @@ from nwflex.dp_core import AlignmentResult
 from nwflex.repeats import STRLocus
 
 from .dp_core import FlexInput, run_flex_dp
-from .fast import run_flex_dp_fast
+from .fast import run_flex_dp_fast, run_flex_dp_fast_path
 
 from .ep_patterns import (
     build_EP_standard,
@@ -525,6 +525,7 @@ class RefAligner:
         free_Y: bool = False,
         return_data: bool = False,
         fast_mode: bool = False,
+        fast_traceback: bool = True,
     ):
         self.config = dict()
         self.config["X"] = ref
@@ -538,12 +539,18 @@ class RefAligner:
         self.return_data = return_data
         self.flex_dp = run_flex_dp_fast if fast_mode else run_flex_dp
         self.reflen = len(ref)
+        self.fast_traceback = fast_traceback
 
     def align(self, read: str) -> AlignmentResult:
         """
         Align a read Y against the reference X provided at initialization.
         """
         flex_input = FlexInput(**self.config, Y=read)
+        if self.fast_traceback and self.flex_dp is run_flex_dp_fast:
+            return run_flex_dp_fast_path(
+                flex_input,
+                return_data=self.return_data,
+            )
         return self.flex_dp(
             flex_input,
             return_data=self.return_data,

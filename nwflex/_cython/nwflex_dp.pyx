@@ -39,6 +39,8 @@ def nwflex_dp_core(
     cnp.ndarray[ITYPE_t, ndim=2] ep_ends,
     bint free_X = False,
     bint free_Y = False,
+    bint return_path = False,
+    bint return_matrices = True,
 ):
     """
     Low-level NW-flex DP core with row-wise extra predecessors encoded as intervals.
@@ -64,6 +66,10 @@ def nwflex_dp_core(
         for k = 0..ep_counts[i]-1.
     free_X, free_Y : bool
         If True, perform semi-global alignment local in X or Y, respectively.
+    return_path : bool
+        If True, perform traceback internally and return (score, path_array).
+    return_matrices : bool
+        If True, include DP and traceback matrices in the return value.
 
     Returns
     -------
@@ -122,6 +128,22 @@ def nwflex_dp_core(
     cdef DTYPE_t c0, c1, c2, best, score, candM, candX
     cdef ITYPE_t st
     cdef ITYPE_t xi, yj
+
+    # Traceback variables
+    cdef DTYPE_t best_score
+    cdef DTYPE_t best_col_score
+    cdef ITYPE_t best_row
+    cdef ITYPE_t best_col
+    cdef ITYPE_t best_state
+    cdef ITYPE_t prev_row
+    cdef ITYPE_t state
+    cdef int max_path
+    cdef int path_len
+    cdef int left, right
+    cdef ITYPE_t tmp0, tmp1, tmp2
+    cdef cnp.ndarray[ITYPE_t, ndim=2] path_np
+    cdef ITYPE_t[:, :] path
+    cdef Py_ssize_t ep_len
 
     # ------------------------------------------------------------------
     # Initialization
@@ -297,6 +319,215 @@ def nwflex_dp_core(
                             Xg_row[i, j] = r
 
                         r += 1
+
+    # ------------------------------------------------------------------
+    # Optional traceback in Cython
+    # ------------------------------------------------------------------
+    if return_path:
+        # Determine traceback start cell (mirrors dp_core.traceback_alignment)
+        best_score = NEG_INF
+        best_row = n
+        best_col = m
+        best_state = 1                  # default to M state
+        best_col_score = best_score     # for free_Y case
+
+        if free_Y:
+            # semi-global in Y: allow ending at any column in row n
+            for j in range(ncols):
+                # check Yg, M, Xg at (n, j)
+                c0 = Yg[n, j]
+                if c0 > best_score:
+                    best_score = c0
+                    best_row = n
+                    best_col = j
+                    best_state = 0
+                c1 = M[n, j]
+                if c1 > best_score:
+                    best_score = c1
+                    best_row = n
+                    best_col = j
+                    best_state = 1
+                c2 = Xg[n, j]
+                if c2 > best_score:
+                    best_score = c2
+                    best_row = n
+                    best_col = j
+                    best_state = 2
+            # end of semi-global in Y, store best column score
+            best_col_score = best_score
+
+        if free_X:
+            # semi-global in X: allow ending at any row in column m
+            for i in range(nrows):
+                # as above, check Yg, M, Xg at (i, m)
+                c0 = Yg[i, m]
+                if c0 > best_score:
+                    best_score = c0
+                    best_row = i
+                    best_col = m
+                    best_state = 0
+                c1 = M[i, m]
+                if c1 > best_score:
+                    best_score = c1
+                    best_row = i
+                    best_col = m
+                    best_state = 1
+                c2 = Xg[i, m]
+                if c2 > best_score:
+                    best_score = c2
+                    best_row = i
+                    best_col = m
+                    best_state = 2
+        else:
+            # Global in X: include terminal predecessors if provided.
+            # Check (n, m) first (global)
+            c0 = Yg[n, m]
+            if c0 > best_score:
+                best_score = c0
+                best_row = n
+                best_col = m
+                best_state = 0
+            c1 = M[n, m]
+            if c1 > best_score:
+                best_score = c1
+                best_row = n
+                best_col = m
+                best_state = 1
+            c2 = Xg[n, m]
+            if c2 > best_score:
+                best_score = c2
+                best_row = n
+                best_col = m
+                best_state = 2
+            # Then check extra predecessors for row n+1
+            ep_len = ep_c.shape[0]
+            # check if there are extra predecessors for row n+1
+            if ep_len > nrows and ep_c[nrows] > 0:
+                ## for each extra predecessor, check (r, m)
+                for k in range(ep_c[nrows]):
+                    r = ep_s[nrows, k]
+                    while r <= ep_e[nrows, k]:
+                        c0 = Yg[r, m]
+                        if c0 > best_score:
+                            best_score = c0
+                            best_row = r
+                            best_col = m
+                            best_state = 0
+                        c1 = M[r, m]
+                        if c1 > best_score:
+                            best_score = c1
+                            best_row = r
+                            best_col = m
+                            best_state = 1
+                        c2 = Xg[r, m]
+                        if c2 > best_score:
+                            best_score = c2
+                            best_row = r
+                            best_col = m
+                            best_state = 2
+                        r += 1
+
+        # If the best score is still the one found by the free_Y scan (row n),
+        # we keep row n and its best column. Otherwise the best score came from
+        # the free_X/terminal-row search, so we fix column m and keep that row.
+        if best_score == best_col_score:
+            best_row = n
+        else:
+            best_col = m
+
+        # Traceback path (stored in reverse, then reversed in place)
+        # Allocate max possible path length: n + m + 2
+        max_path = n + m + 2
+        path_np = np.empty((max_path, 3), dtype=np.int32)
+        path = path_np
+        path_len = 0
+
+        i = best_row
+        j = best_col
+        state = best_state
+        # record trailing gaps, as needed
+        # NOTE: not sure we need to do this, all cases can be inferred.
+        if best_row != n:
+            # if we are here, we are traveling the last column
+            # record the gaps against X if free_X, but not if a jump
+            if free_X:
+                for i in range(n, best_row, -1):
+                    path[path_len, 0] = i
+                    path[path_len, 1] = j
+                    path[path_len, 2] = 2
+                    path_len += 1
+        elif best_col != m:
+            # if we are here, we are traveling the last row
+            # record the gaps against Y
+            for j in range(m, best_col, -1):
+                path[path_len, 0] = i
+                path[path_len, 1] = j
+                path[path_len, 2] = 0
+                path_len += 1
+
+        # and now begin the main traceback
+        i = best_row
+        j = best_col
+        while i > 0 or j > 0:
+            # record current entry
+            path[path_len, 0] = i
+            path[path_len, 1] = j
+            path[path_len, 2] = state
+            path_len += 1
+            # step to predecessor
+            if state == 0:
+                # Yg: move left, X gets a gap.
+                state = Yg_tr[i, j]
+                j -= 1
+            elif state == 1:
+                # M: move diagonally, maybe jump in rows
+                prev_row = M_row[i, j]
+                state = M_tr[i, j]
+                i = prev_row
+                j -= 1
+            else:
+                # Xg: move up, Y gets a gap, maybe jump in rows
+                prev_row = Xg_row[i, j]
+                state = Xg_tr[i, j]
+                i = prev_row
+
+        # Reverse path in place
+        left = 0
+        right = path_len - 1
+        while left < right:
+            tmp0 = path[left, 0]
+            tmp1 = path[left, 1]
+            tmp2 = path[left, 2]
+
+            path[left, 0] = path[right, 0]
+            path[left, 1] = path[right, 1]
+            path[left, 2] = path[right, 2]
+
+            path[right, 0] = tmp0
+            path[right, 1] = tmp1
+            path[right, 2] = tmp2
+
+            left += 1
+            right -= 1
+
+        if return_matrices:
+            return (
+                best_score,
+                path_np[:path_len],
+                Yg_np,
+                M_np,
+                Xg_np,
+                Yg_tr_np,
+                M_tr_np,
+                Xg_tr_np,
+                M_row_np,
+                Xg_row_np,
+            )
+        else:
+            return (
+                best_score,
+                path_np[:path_len],
+            )
 
     return (
         Yg_np,
