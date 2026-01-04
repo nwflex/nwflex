@@ -5,7 +5,7 @@ import numpy as np
 from nwflex.dp_core import FlexInput
 from nwflex.ep_patterns import build_EP_single_block, build_EP_standard
 from nwflex.fast import run_flex_dp_fast, run_flex_dp_fast_path
-from nwflex.aligners import RefAligner
+from nwflex.aligners import RefAligner, alignment_to_cigar
 
 
 def test_fast_path_matches_fast(scoring_params, rng, random_dna_factory):
@@ -96,3 +96,33 @@ def test_refaligner_fast_traceback_flag(scoring_params):
     assert res_fast.Y_aln == res_slow.Y_aln
     assert res_fast.path == res_slow.path
     assert len(res_fast.jumps) == len(res_slow.jumps)
+
+
+def test_fast_path_return_cigar(scoring_params):
+    """CIGAR-only path matches alignment_to_cigar output."""
+    X = "ACGTACGTACGT"
+    Y = "ACGTACGT"
+    EP = build_EP_standard(len(X))
+
+    cfg = FlexInput(
+        X=X,
+        Y=Y,
+        extra_predecessors=EP,
+        **scoring_params,
+    )
+
+    ref_result = run_flex_dp_fast(cfg, return_data=False)
+    ref_start, ref_cigar = alignment_to_cigar(
+        ref_result.path,
+        lenX=len(X),
+        lenY=len(Y),
+    )
+
+    score, start_pos, cigar = run_flex_dp_fast_path(
+        cfg,
+        return_cigar=True,
+    )
+
+    assert score == ref_result.score
+    assert start_pos == ref_start
+    assert cigar == ref_cigar

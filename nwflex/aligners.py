@@ -526,6 +526,7 @@ class RefAligner:
         return_data: bool = False,
         fast_mode: bool = False,
         fast_traceback: bool = True,
+        fast_cigar_only: bool = False,
     ):
         self.config = dict()
         self.config["X"] = ref
@@ -540,17 +541,13 @@ class RefAligner:
         self.flex_dp = run_flex_dp_fast if fast_mode else run_flex_dp
         self.reflen = len(ref)
         self.fast_traceback = fast_traceback
+        self.fast_cigar_only = fast_cigar_only
 
     def align(self, read: str) -> AlignmentResult:
         """
         Align a read Y against the reference X provided at initialization.
         """
         flex_input = FlexInput(**self.config, Y=read)
-        if self.fast_traceback and self.flex_dp is run_flex_dp_fast:
-            return run_flex_dp_fast_path(
-                flex_input,
-                return_data=self.return_data,
-            )
         return self.flex_dp(
             flex_input,
             return_data=self.return_data,
@@ -585,6 +582,19 @@ class RefAligner:
         """
         Align a read and return a simple dict with score and CIGAR.
         """
+        if self.fast_cigar_only and self.flex_dp is run_flex_dp_fast:
+            flex_input = FlexInput(**self.config, Y=read)
+            score, start_pos, cigar = run_flex_dp_fast_path(
+                flex_input,
+                return_cigar=True,
+            )
+            aligned_bases = _op_length_total(cigar, {"M"})
+            return {
+                "score": score,
+                "aligned_bases": aligned_bases,
+                "start_pos": start_pos,
+                "cigar": cigar,
+            }
         result = self.align(read)
         ans = self.simple_output(result, readlen=len(read))
         return ans
@@ -594,6 +604,20 @@ class RefAligner:
         Align a batch of reads and return simple dicts with score and CIGAR.
         """
         for read in reads:
+            if self.fast_cigar_only and self.flex_dp is run_flex_dp_fast:
+                flex_input = FlexInput(**self.config, Y=read)
+                score, start_pos, cigar = run_flex_dp_fast_path(
+                    flex_input,
+                    return_cigar=True,
+                )
+                aligned_bases = _op_length_total(cigar, {"M"})
+                yield {
+                    "score": score,
+                    "aligned_bases": aligned_bases,
+                    "start_pos": start_pos,
+                    "cigar": cigar,
+                }
+                continue
             result = self.align(read)
             ans = self.simple_output(result, readlen=len(read))
             yield ans

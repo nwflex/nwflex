@@ -132,6 +132,68 @@ def extract_jumps_from_path(
     return jumps
 
 
+def path_array_to_cigar(
+    path_array: np.ndarray,
+    *,
+    lenX: int,
+    lenY: int,
+) -> tuple[int, str]:
+    """
+    Compute start_pos and CIGAR from a path array.
+    Args:
+        path_array: Array of (i, j, state) in forward order.
+        lenX: Length of reference sequence.
+        lenY: Length of read sequence.
+    Returns:
+        Tuple of (start_pos, cigar string).
+
+    TODO: This duplicates logic in aligners.alignment_to_cigar (poorly named!); consider unifying.
+    """
+    if path_array.size == 0:
+        return -1, ""
+
+    pi = 0
+    start_pos = -1
+    cigar_states: list[str] = []
+
+    for i, j, state in path_array:
+        if j == 0:
+            pi = i
+            continue
+        if i == 0:
+            cigar_states.append("S")
+            continue
+        if j == lenY and state == 2:
+            break
+        if start_pos == -1:
+            start_pos = i
+        if i - pi > 1:
+            cigar_states.extend(["N"] * (i - pi - 1))
+        if state == 0:
+            cigar_states.append("S" if i == lenX else "I")
+        elif state == 1:
+            cigar_states.append("M")
+        else:
+            cigar_states.append("D")
+        pi = i
+
+    if not cigar_states:
+        return int(start_pos), ""
+
+    parts = []
+    prev = cigar_states[0]
+    count = 1
+    for op in cigar_states[1:]:
+        if op == prev:
+            count += 1
+        else:
+            parts.append(f"{count}{prev}")
+            prev = op
+            count = 1
+    parts.append(f"{count}{prev}")
+    return int(start_pos), "".join(parts)
+
+
 def run_flex_dp_fast(
     config: FlexInput,
     return_data: bool = False,
@@ -218,11 +280,32 @@ def run_flex_dp_fast(
 def run_flex_dp_fast_path(
     config: FlexInput,
     return_data: bool = False,
-) -> AlignmentResult:
-    """Fast NW-flex DP with Cython traceback path returned directly."""
+    return_path_array: bool = False,
+    return_cigar: bool = False,
+):
+    """
+    Fast NW-flex DP using the Cython core and returning lightweight outputs.
+
+    By default this returns a full AlignmentResult (score, aligned strings,
+    path list, jumps). Use the flags to return only a NumPy path array or
+    a CIGAR string to avoid extra Python work.
+
+    Args:
+        config: FlexInput with sequences, scoring, and EP configuration.
+        return_data: If True, include DP matrices in the return value.
+        return_path_array: If True, return (score, path_array[, data]).
+        return_cigar: If True, return (score, start_pos, cigar).
+
+    Returns:
+        AlignmentResult by default, or tuples as described above.
+    """
     if not CYTHON_AVAILABLE:
         _cython_not_available_error()
 
+    if return_path_array and return_cigar:
+        raise ValueError("Only one of return_path_array or return_cigar may be True")
+
+    # TODO: cache X_codes and EP interval encoding per aligner/locus.
     X_codes = _encode_sequence(config.X, config.alphabet_to_index)
     Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
     ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
@@ -279,6 +362,17 @@ def run_flex_dp_fast_path(
             return_matrices=False,
         )
         data = None
+
+    if return_cigar:
+        start_pos, cigar = path_array_to_cigar(
+            path_array,
+            lenX=len(config.X),
+            lenY=len(config.Y),
+        )
+        return score, start_pos, cigar
+
+    if return_path_array:
+        return (score, path_array) if data is None else (score, path_array, data)
 
     X_aln, Y_aln = reconstruct_aligned_strings(config.X, config.Y, path_array)
     jumps = extract_jumps_from_path(
