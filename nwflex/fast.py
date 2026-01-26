@@ -20,10 +20,12 @@ from .dp_core import FlexInput, FlexData, RowJump, traceback_alignment, Alignmen
 from .ep_intervals import ep_to_intervals
 
 try:
-    from ._cython.nwflex_dp import nwflex_dp_core
+    from ._cython.nwflex_dp import nwflex_dp_core, DPBuffers, nwflex_dp_core_buffered
     CYTHON_AVAILABLE = True
-except ImportError:    
-    nwflex_dp_core = None  # Placeholder to avoid NameError
+except ImportError:
+    nwflex_dp_core = None
+    DPBuffers = None
+    nwflex_dp_core_buffered = None
     CYTHON_AVAILABLE = False
 
 def _cython_not_available_error():
@@ -390,3 +392,55 @@ def run_flex_dp_fast_path(
         jumps=jumps,
         data=data,
     )
+
+
+def run_flex_dp_fast_buffered(
+    config: FlexInput,
+    buffers: "DPBuffers",
+    return_cigar: bool = True,
+):
+    """
+    Fast NW-flex DP using pre-allocated buffers for maximum throughput.
+
+    This is the fastest option for aligning many reads against the same
+    reference, as it avoids repeated memory allocation.
+
+    Args:
+        config: FlexInput with sequences, scoring, and EP configuration.
+        buffers: Pre-allocated DPBuffers object.
+        return_cigar: If True (default), return (score, start_pos, cigar).
+                      If False, return (score, path_array).
+
+    Returns:
+        Tuple as described above.
+    """
+    if not CYTHON_AVAILABLE:
+        _cython_not_available_error()
+
+    X_codes = _encode_sequence(config.X, config.alphabet_to_index)
+    Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
+    ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
+
+    score, path_array = nwflex_dp_core_buffered(
+        X_codes,
+        Y_codes,
+        config.score_matrix,
+        config.gap_open,
+        config.gap_extend,
+        ep_counts,
+        ep_starts,
+        ep_ends,
+        config.free_X,
+        config.free_Y,
+        buffers,
+    )
+
+    if return_cigar:
+        start_pos, cigar = path_array_to_cigar(
+            path_array,
+            lenX=len(config.X),
+            lenY=len(config.Y),
+        )
+        return score, start_pos, cigar
+
+    return score, path_array
