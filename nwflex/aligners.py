@@ -35,9 +35,14 @@ from .ep_intervals import ep_to_intervals
 
 # Import Cython buffered functions if available
 try:
-    from ._cython.nwflex_dp import nwflex_dp_core_buffered, DPBuffers
+    from ._cython.nwflex_dp import (
+        nwflex_dp_core_buffered,
+        nwflex_dp_core_buffered_cigar,
+        DPBuffers,
+    )
 except ImportError:
     nwflex_dp_core_buffered = None
+    nwflex_dp_core_buffered_cigar = None
     DPBuffers = None
 
 from .ep_patterns import (
@@ -563,7 +568,7 @@ class RefAligner:
             fast_mode
             and fast_cigar_only
             and CYTHON_AVAILABLE
-            and nwflex_dp_core_buffered is not None
+            and nwflex_dp_core_buffered_cigar is not None
         )
         if self._use_buffered:
             # Pre-encode reference sequence (same for all reads)
@@ -622,9 +627,9 @@ class RefAligner:
         Align a read and return a simple dict with score and CIGAR.
         """
         if self._use_buffered:
-            # Fast path: use cached reference data and pre-allocated buffers
+            # Fast path: use cached reference data, buffers, and direct CIGAR
             Y_codes = _encode_sequence(read, self._alphabet_to_index)
-            score, path_array = nwflex_dp_core_buffered(
+            score, start_pos, cigar = nwflex_dp_core_buffered_cigar(
                 self._X_codes,
                 Y_codes,
                 self._score_matrix,
@@ -636,9 +641,6 @@ class RefAligner:
                 self._free_X,
                 self._free_Y,
                 self._buffers,
-            )
-            start_pos, cigar = path_array_to_cigar(
-                path_array, lenX=self.reflen, lenY=len(read)
             )
             aligned_bases = _op_length_total(cigar, {"M"})
             return {
