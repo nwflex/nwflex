@@ -145,6 +145,57 @@ Alignment score        : 125.0
 Perfect alignment      : 125.0
 ```
 
+### Batch alignment with RefAligner
+
+For aligning many reads against the same reference (e.g. in a pipeline),
+`RefAligner` caches the reference encoding and reuses pre-allocated DP
+buffers across reads. This is the fastest path for production use.
+
+```python
+import nwflex as nw
+
+# Define locus and scoring
+locus = nw.STRLocus(A="ATCGATCG", R="CAG", N=10, B="GTCAGTCA")
+scoring = nw.default.align_params(semiglobal=True)
+ep = nw.build_EP_STR_phase(locus.n, locus.s, locus.e, locus.k)
+
+# Create aligner (caches reference data and DP buffers)
+aligner = nw.RefAligner(
+    ref=locus.X,
+    extra_predecessors=ep,
+    **scoring,
+)
+
+# Align individual reads
+result = aligner.align_simple("ATCGATCGCAGCAGCAGGTCAGTCA")
+print(result)
+# {'score': 125.0, 'aligned_bases': 25, 'start_pos': 1, 'cigar': '8M21N17M'}
+
+# Or batch-align
+reads = [locus.build_locus_variant(0, 0, M) for M in range(1, 6)]
+for res in aligner.align_batch_simple(reads):
+    print(f"score={res['score']:.0f}  cigar={res['cigar']}")
+```
+
+`align_simple` returns a dict with `score`, `start_pos`, `cigar`, and
+`aligned_bases`. For the full `AlignmentResult` (aligned strings, path,
+jumps), use `aligner.align(read)` instead.
+
+### Cython acceleration
+
+The Cython extension compiles automatically during `pip install -e .`
+and provides a unified DP kernel that handles fill, traceback, and CIGAR
+generation in a single C-speed call. The Python API (`align_standard`,
+`align_single_block`, `RefAligner`, etc.) uses it transparently when
+available. If the extension fails to compile (missing C compiler), the
+library falls back to the pure-Python DP core with identical results.
+
+To check availability:
+```python
+from nwflex.fast import CYTHON_AVAILABLE
+print(CYTHON_AVAILABLE)  # True if compiled
+```
+
 ### Optional Dependencies
 
 ```bash
@@ -217,10 +268,10 @@ cd notebooks && ./build_pdf.sh
 
 | Module | Purpose |
 |--------|---------|
-| `aligners.py` | User-facing alignment functions<br> (`align_standard`, `align_single_block`, `align_STR_block`, etc.) |
+| `aligners.py` | User-facing alignment functions and `RefAligner`:<br> `align_standard`, `align_single_block`, `align_STR_block`, `RefAligner` |
 | `dp_core.py` | Core alignment dataclasses:<br>`FlexInput`, `FlexData`, `RowJump`, `AlignmentResult` |
 | `ep_patterns.py` | EP configuration builders:<br> `build_EP_standard`, `build_EP_single_block`, `build_EP_STR_phase`, `build_EP_multi_STR` |
-| `fast.py` | Cython-accelerated DP via<br> `run_flex_dp_fast()` |
+| `fast.py` | Cython wrapper:<br> `run_flex_dp_fast()`, `DPBuffers` |
 | `repeats.py` | STR utilities:<br> `phase_repeat`, `STRLocus`, `CompoundSTRLocus` |
 | `validation.py` | Baseline implementations for testing:<br> `nwg_global`, `sflex_naive` |
 

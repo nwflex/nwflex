@@ -1,31 +1,28 @@
 """
 fast.py — Cython-backed NW-flex DP wrapper
 
-This module provides a drop-in replacement for the Python DP core:
+Provides a drop-in replacement for the Python DP core:
     run_flex_dp_fast(config, return_data=False)
 
 It:
   * encodes X and Y as integer codes using config.alphabet_to_index,
-  * converts extra_predecessors[i] into interval arrays suitable for
-    the Cython kernel,
-  * calls nwflex_dp_core (Cython),
-  * wraps the resulting DP arrays into FlexData,
-  * reuses traceback_alignment to recover (X_aln, Y_aln, path, jumps),
-  * returns an AlignmentResult with the same shape as the Python path.
+  * converts extra_predecessors[i] into interval arrays,
+  * casts score_matrix to float32,
+  * calls the unified Cython nwflex_dp_core,
+  * wraps the results into AlignmentResult or (score, start_pos, cigar).
 """
 
 import numpy as np
 
-from .dp_core import FlexInput, FlexData, RowJump, traceback_alignment, AlignmentResult
+from .dp_core import FlexInput, FlexData, RowJump, AlignmentResult
 from .ep_intervals import ep_to_intervals
 
 try:
-    from ._cython.nwflex_dp import nwflex_dp_core, DPBuffers, nwflex_dp_core_buffered
+    from ._cython.nwflex_dp import nwflex_dp_core, DPBuffers
     CYTHON_AVAILABLE = True
 except ImportError:
     nwflex_dp_core = None
     DPBuffers = None
-    nwflex_dp_core_buffered = None
     CYTHON_AVAILABLE = False
 
 def _cython_not_available_error():
@@ -134,80 +131,13 @@ def extract_jumps_from_path(
     return jumps
 
 
-def path_array_to_cigar(
-    path_array: np.ndarray,
-    *,
-    lenX: int,
-    lenY: int,
-    free_X: bool = False,
-) -> tuple[int, str]:
-    """
-    Compute start_pos and CIGAR from a path array.
-    Args:
-        path_array: Array of (i, j, state) in forward order.
-        lenX: Length of reference sequence.
-        lenY: Length of read sequence.
-    Returns:
-        Tuple of (start_pos, cigar string).
-
-    TODO: This duplicates logic in aligners.alignment_to_cigar (poorly named!); consider unifying.
-    """
-    if path_array.size == 0:
-        return -1, ""
-
-    pi = 0
-    start_pos = -1
-    cigar_states: list[str] = []
-
-    for i, j, state in path_array:
-        if j == 0:
-            pi = i
-            continue
-        if i == 0:
-            cigar_states.append("S")
-            continue
-        if j == lenY and state == 2:
-            break
-        if start_pos == -1:
-            start_pos = i
-        if i - pi > 1:
-            cigar_states.extend(["N"] * (i - pi - 1))
-        if state == 0:
-            cigar_states.append("S" if i == lenX else "I")
-        elif state == 1:
-            cigar_states.append("M")
-        else:
-            cigar_states.append("D")
-        pi = i
-
-    # Terminal contraction: if the path ended before row lenX,
-    # the remaining rows were contracted via EP[n+1]
-    if not free_X and pi < lenX:
-        cigar_states.extend(["N"] * (lenX - pi))
-
-    if not cigar_states:
-        return int(start_pos), ""
-
-    parts = []
-    prev = cigar_states[0]
-    count = 1
-    for op in cigar_states[1:]:
-        if op == prev:
-            count += 1
-        else:
-            parts.append(f"{count}{prev}")
-            prev = op
-            count = 1
-    parts.append(f"{count}{prev}")
-    return int(start_pos), "".join(parts)
-
-
 def run_flex_dp_fast(
     config: FlexInput,
     return_data: bool = False,
+    return_cigar: bool = False,
 ) -> AlignmentResult:
     """
-    Fast NW-flex DP using the Cython core.
+    Fast NW-flex DP using the unified Cython core.
 
     Parameters
     ----------
@@ -215,39 +145,22 @@ def run_flex_dp_fast(
         Sequences, scoring scheme, and extra predecessor sets E(i).
     return_data : bool, default False
         If True, attach the full FlexData object in the result.
+    return_cigar : bool, default False
+        If True, return (score, start_pos, cigar) instead of AlignmentResult.
 
     Returns
     -------
-    AlignmentResult
-        Same structure as the Python-based aligners return:
-          - score
-          - X_aln, Y_aln
-          - jumps (list[RowJump])
-          - data (FlexData or None)
-          - path (list[(i,j,state)])
+    AlignmentResult, or tuple (score, start_pos, cigar) if return_cigar=True.
     """
-    ## check cython availability
     if not CYTHON_AVAILABLE:
         _cython_not_available_error()
-    # Encode sequences as integer codes
+
     X_codes = _encode_sequence(config.X, config.alphabet_to_index)
     Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
     score_matrix = np.ascontiguousarray(config.score_matrix, dtype=np.float32)
-
-    # Convert EP list-of-lists -> interval arrays
     ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
 
-    # Call the Cython DP core
-    (
-        Yg,
-        M,
-        Xg,
-        Yg_tr,
-        M_tr,
-        Xg_tr,
-        M_row,
-        Xg_row,
-    ) = nwflex_dp_core(
+    result = nwflex_dp_core(
         X_codes,
         Y_codes,
         score_matrix,
@@ -258,131 +171,22 @@ def run_flex_dp_fast(
         ep_ends,
         config.free_X,
         config.free_Y,
+        return_matrices=return_data,
     )
-
-    # Wrap into FlexData
-    data = FlexData(
-        Yg=Yg,
-        M=M,
-        Xg=Xg,
-        Yg_trace=Yg_tr,
-        M_trace=M_tr,
-        Xg_trace=Xg_tr,
-        M_row=M_row,
-        Xg_row=Xg_row,
-    )
-
-    # Use the existing Python traceback logic
-    X_aln, Y_aln, score, path, jumps = traceback_alignment(config, data)    
-
-    return AlignmentResult(
-        score=score,
-        X_aln=X_aln,
-        Y_aln=Y_aln,
-        path=path,
-        jumps=jumps,
-        data=data if return_data else None,
-        
-    )
-
-
-def run_flex_dp_fast_path(
-    config: FlexInput,
-    return_data: bool = False,
-    return_path_array: bool = False,
-    return_cigar: bool = False,
-):
-    """
-    Fast NW-flex DP using the Cython core and returning lightweight outputs.
-
-    By default this returns a full AlignmentResult (score, aligned strings,
-    path list, jumps). Use the flags to return only a NumPy path array or
-    a CIGAR string to avoid extra Python work.
-
-    Args:
-        config: FlexInput with sequences, scoring, and EP configuration.
-        return_data: If True, include DP matrices in the return value.
-        return_path_array: If True, return (score, path_array[, data]).
-        return_cigar: If True, return (score, start_pos, cigar).
-
-    Returns:
-        AlignmentResult by default, or tuples as described above.
-    """
-    if not CYTHON_AVAILABLE:
-        _cython_not_available_error()
-
-    if return_path_array and return_cigar:
-        raise ValueError("Only one of return_path_array or return_cigar may be True")
-
-    # TODO: cache X_codes and EP interval encoding per aligner/locus.
-    X_codes = _encode_sequence(config.X, config.alphabet_to_index)
-    Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
-    score_matrix = np.ascontiguousarray(config.score_matrix, dtype=np.float32)
-    ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
 
     if return_data:
-        (
-            score,
-            path_array,
-            Yg,
-            M,
-            Xg,
-            Yg_tr,
-            M_tr,
-            Xg_tr,
-            M_row,
-            Xg_row,
-        ) = nwflex_dp_core(
-            X_codes,
-            Y_codes,
-            score_matrix,
-            config.gap_open,
-            config.gap_extend,
-            ep_counts,
-            ep_starts,
-            ep_ends,
-            config.free_X,
-            config.free_Y,
-            return_path=True,
-            return_matrices=True,
-        )
+        score, start_pos, cigar, path_array, Yg, M, Xg, Yg_tr, M_tr, Xg_tr, M_row, Xg_row = result
         data = FlexData(
-            Yg=Yg,
-            M=M,
-            Xg=Xg,
-            Yg_trace=Yg_tr,
-            M_trace=M_tr,
-            Xg_trace=Xg_tr,
-            M_row=M_row,
-            Xg_row=Xg_row,
+            Yg=Yg, M=M, Xg=Xg,
+            Yg_trace=Yg_tr, M_trace=M_tr, Xg_trace=Xg_tr,
+            M_row=M_row, Xg_row=Xg_row,
         )
     else:
-        score, path_array = nwflex_dp_core(
-            X_codes,
-            Y_codes,
-            score_matrix,
-            config.gap_open,
-            config.gap_extend,
-            ep_counts,
-            ep_starts,
-            ep_ends,
-            config.free_X,
-            config.free_Y,
-            return_path=True,
-            return_matrices=False,
-        )
+        score, start_pos, cigar, path_array = result
         data = None
 
     if return_cigar:
-        start_pos, cigar = path_array_to_cigar(
-            path_array,
-            lenX=len(config.X),
-            lenY=len(config.Y),
-        )
         return score, start_pos, cigar
-
-    if return_path_array:
-        return (score, path_array) if data is None else (score, path_array, data)
 
     X_aln, Y_aln = reconstruct_aligned_strings(config.X, config.Y, path_array)
     jumps = extract_jumps_from_path(
@@ -400,56 +204,3 @@ def run_flex_dp_fast_path(
         jumps=jumps,
         data=data,
     )
-
-
-def run_flex_dp_fast_buffered(
-    config: FlexInput,
-    buffers: "DPBuffers",
-    return_cigar: bool = True,
-):
-    """
-    Fast NW-flex DP using pre-allocated buffers for maximum throughput.
-
-    This is the fastest option for aligning many reads against the same
-    reference, as it avoids repeated memory allocation.
-
-    Args:
-        config: FlexInput with sequences, scoring, and EP configuration.
-        buffers: Pre-allocated DPBuffers object.
-        return_cigar: If True (default), return (score, start_pos, cigar).
-                      If False, return (score, path_array).
-
-    Returns:
-        Tuple as described above.
-    """
-    if not CYTHON_AVAILABLE:
-        _cython_not_available_error()
-
-    X_codes = _encode_sequence(config.X, config.alphabet_to_index)
-    Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
-    score_matrix = np.ascontiguousarray(config.score_matrix, dtype=np.float32)
-    ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
-
-    score, path_array = nwflex_dp_core_buffered(
-        X_codes,
-        Y_codes,
-        score_matrix,
-        config.gap_open,
-        config.gap_extend,
-        ep_counts,
-        ep_starts,
-        ep_ends,
-        config.free_X,
-        config.free_Y,
-        buffers,
-    )
-
-    if return_cigar:
-        start_pos, cigar = path_array_to_cigar(
-            path_array,
-            lenX=len(config.X),
-            lenY=len(config.Y),
-        )
-        return score, start_pos, cigar
-
-    return score, path_array
