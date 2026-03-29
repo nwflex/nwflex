@@ -192,45 +192,44 @@ def nwflex_dp_core(
     Yg[0, 0] = NEG_INF
     M[0, 0] = 0.0
     Xg[0, 0] = NEG_INF
-    Yg_tr[0, 0] = 1
-    M_tr[0, 0] = 1
-    Xg_tr[0, 0] = 1
+    Yg_tr[0, 0] = 0   # go left (safe direction for row 0)
+    M_tr[0, 0] = 0
+    Xg_tr[0, 0] = 0
     M_row[0, 0] = -1
     Xg_row[0, 0] = -1
 
-    # First row: gaps in X (Yg state)
+    # First row: only Yg is reachable (horizontal gaps)
+    # M and Xg are unreachable; all trace pointers point left (state 0 = Yg)
     for j in range(1, ncols):
+        M[0, j] = NEG_INF
+        Xg[0, j] = NEG_INF
+        Yg_tr[0, j] = 0
+        M_tr[0, j] = 0
+        Xg_tr[0, j] = 0
+        M_row[0, j] = -1
+        Xg_row[0, j] = -1
+
         if free_Y:
             Yg[0, j] = 0.0
-            M[0, j] = 0.0
-            Xg[0, j] = NEG_INF
-            Yg_tr[0, j] = 1
-            M_tr[0, j] = 1
-            Xg_tr[0, j] = 1
         else:
             c0 = Yg[0, j - 1] + ge
             c1 = M[0, j - 1] + gs
             Yg[0, j] = c0 if c0 >= c1 else c1
             Yg_tr[0, j] = 0 if c0 >= c1 else 1
-            M[0, j] = NEG_INF
-            Xg[0, j] = NEG_INF
-            M_tr[0, j] = 1
-            Xg_tr[0, j] = 1
-        M_row[0, j] = -1
-        Xg_row[0, j] = -1
 
-    # First column: gaps in Y (Xg state) with EP refinement
+    # First column: only Xg is reachable (vertical gaps)
+    # M and Yg are unreachable; all trace pointers point up (state 2 = Xg)
     for i in range(1, nrows):
         Yg[i, 0] = NEG_INF
         M[i, 0] = NEG_INF
-        Yg_tr[i, 0] = 1
-        M_tr[i, 0] = 1
+        Yg_tr[i, 0] = 2
+        M_tr[i, 0] = 2
+        Xg_tr[i, 0] = 2
         M_row[i, 0] = row_def[i]
         Xg_row[i, 0] = row_def[i]
 
         if free_X:
             Xg[i, 0] = 0.0
-            Xg_tr[i, 0] = 2
         else:
             c1 = M[i - 1, 0] + gs
             c2 = Xg[i - 1, 0] + ge
