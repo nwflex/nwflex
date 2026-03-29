@@ -1156,7 +1156,7 @@ def nwflex_dp_core_buffered_cigar(
 
         if free_X:
             Xg[i, 0] = 0.0
-            Xg_tr[i, 0] = 1
+            Xg_tr[i, 0] = 2
         else:
             c1 = M[i - 1, 0] + gs
             c2 = Xg[i - 1, 0] + ge
@@ -1246,36 +1246,39 @@ def nwflex_dp_core_buffered_cigar(
                 for k in range(ep_c[i]):
                     r = ep_s[i, k]
                     while r <= ep_e[i, k]:
-                        c0 = Yg[r, j - 1] + score
-                        c1 = M [r, j - 1] + score
-                        c2 = Xg[r, j - 1] + score
-                        if c0 > M[i, j]:
-                            M[i, j] = c0
-                            M_tr[i, j] = 0
-                            M_row[i, j] = r
-                        if c1 > M[i, j]:
-                            M[i, j] = c1
-                            M_tr[i, j] = 1
-                            M_row[i, j] = r
-                        if c2 > M[i, j]:
-                            M[i, j] = c2
-                            M_tr[i, j] = 2
-                            M_row[i, j] = r
-
-                        c0 = Yg[r, j] + gs
-                        c1 = M [r, j] + gs
-                        c2 = Xg[r, j] + ge
-                        if c0 > best:
-                            best = c0
-                            st = 0
+                        # M(i,j) candidate from row r, col j-1
+                        c0 = Yg[r, j - 1]
+                        c1 = M [r, j - 1]
+                        c2 = Xg[r, j - 1]
+                        best = c0
+                        st = 0
                         if c1 > best:
                             best = c1
                             st = 1
                         if c2 > best:
                             best = c2
                             st = 2
-                        if best > Xg[i, j]:
-                            Xg[i, j] = best
+                        candM = best + score
+                        if candM > M[i, j]:
+                            M[i, j] = candM
+                            M_tr[i, j] = st
+                            M_row[i, j] = r
+
+                        # Xg(i,j) candidate from row r, col j
+                        c0 = Yg[r, j] + gs
+                        c1 = M [r, j] + gs
+                        c2 = Xg[r, j] + ge
+                        best = c0
+                        st = 0
+                        if c1 > best:
+                            best = c1
+                            st = 1
+                        if c2 > best:
+                            best = c2
+                            st = 2
+                        candX = best
+                        if candX > Xg[i, j]:
+                            Xg[i, j] = candX
                             Xg_tr[i, j] = st
                             Xg_row[i, j] = r
                         r += 1
