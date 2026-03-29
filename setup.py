@@ -7,7 +7,7 @@ extensions = [
         name="nwflex._cython.nwflex_dp",
         sources=["nwflex/_cython/nwflex_dp.pyx"],
         include_dirs=[np.get_include()],
-    )
+    ),
 ]
 
 setup(

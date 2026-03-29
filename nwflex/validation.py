@@ -62,9 +62,9 @@ def nwg_global(
     gs, ge = gap_open, gap_extend
 
     # three Gotoh layers
-    Yg = np.full((n + 1, m + 1), -np.inf, dtype=float)
-    M  = np.full((n + 1, m + 1), -np.inf, dtype=float)
-    Xg = np.full((n + 1, m + 1), -np.inf, dtype=float)
+    Yg = np.full((n + 1, m + 1), -np.inf, dtype=np.float32)
+    M  = np.full((n + 1, m + 1), -np.inf, dtype=np.float32)
+    Xg = np.full((n + 1, m + 1), -np.inf, dtype=np.float32)
 
     M[0, 0] = 0.0
 

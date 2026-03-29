@@ -24,7 +24,19 @@ from nwflex.dp_core import AlignmentResult
 from nwflex.repeats import STRLocus
 
 from .dp_core import FlexInput, run_flex_dp
-from .fast import run_flex_dp_fast, run_flex_dp_fast_path
+from .fast import (
+    run_flex_dp_fast,
+    _encode_sequence,
+    _cython_not_available_error,
+    CYTHON_AVAILABLE,
+)
+from .ep_intervals import ep_to_intervals
+
+try:
+    from ._cython.nwflex_dp import nwflex_dp_core, DPBuffers
+except ImportError:
+    nwflex_dp_core = None
+    DPBuffers = None
 
 from .ep_patterns import (
     build_EP_standard,
@@ -64,6 +76,7 @@ def alignment_to_cigar(
         path: Sequence[Tuple[int, int, int]],
         lenX: Optional[int] = None,
         lenY: Optional[int] = None,
+        free_X: bool = False,
 ) -> Tuple[int, str]:
     """
     Convert an AlignmentResult path to a CIGAR string.
@@ -124,6 +137,11 @@ def alignment_to_cigar(
             ## gap in Y
             cigar_states.append('D')
         pi= i
+
+    ## terminal contraction: if the path ended before row lenX,
+    ## the remaining rows were contracted via EP[n+1]
+    if not free_X and pi < lenX:
+        cigar_states.extend(['N'] * (lenX - pi))
 
     cigar_list = rle_ops(cigar_states)
     cigar_str = _write_cigar(cigar_list)
@@ -508,9 +526,12 @@ def align_multi_STR(
 
 class RefAligner:
     """
-    Given a common reference sequence X, scoring parameters, 
-    extra_predecessors, and alphabet, 
+    Given a common reference sequence X, scoring parameters,
+    extra_predecessors, and alphabet,
     create an object that can align multiple reads Y1, Y2, ... against X.
+
+    Caches reference encoding, EP intervals, score matrix, and DP buffers
+    so that per-read cost is minimized.
     """
 
     def __init__(
@@ -523,101 +544,90 @@ class RefAligner:
         alphabet_to_index: Mapping[str, int],
         free_X: bool = False,
         free_Y: bool = False,
-        return_data: bool = False,
+        max_read_length: int = 300,
+        # Legacy parameters (ignored, kept for backward compatibility)
         fast_mode: bool = False,
         fast_traceback: bool = True,
         fast_cigar_only: bool = False,
+        return_data: bool = False,
     ):
-        self.config = dict()
-        self.config["X"] = ref
-        self.config["extra_predecessors"] = extra_predecessors                
-        self.config["score_matrix"]      = score_matrix
-        self.config["gap_open"]          = gap_open
-        self.config["gap_extend"]        = gap_extend
-        self.config["alphabet_to_index"] = alphabet_to_index
-        self.config["free_X"] = free_X
-        self.config["free_Y"] = free_Y
-        self.return_data = return_data
-        self.flex_dp = run_flex_dp_fast if fast_mode else run_flex_dp
         self.reflen = len(ref)
-        self.fast_traceback = fast_traceback
-        self.fast_cigar_only = fast_cigar_only
+
+        # Cache for align() fallback (Python DP path)
+        self.config = dict(
+            X=ref,
+            extra_predecessors=extra_predecessors,
+            score_matrix=score_matrix,
+            gap_open=gap_open,
+            gap_extend=gap_extend,
+            alphabet_to_index=alphabet_to_index,
+            free_X=free_X,
+            free_Y=free_Y,
+        )
+
+        # Cache for align_simple() fast path (Cython)
+        self._X_codes = _encode_sequence(ref, alphabet_to_index)
+        self._ep_counts, self._ep_starts, self._ep_ends = ep_to_intervals(
+            extra_predecessors
+        )
+        self._score_matrix = np.ascontiguousarray(score_matrix, dtype=np.float32)
+        self._gap_open = gap_open
+        self._gap_extend = gap_extend
+        self._free_X = free_X
+        self._free_Y = free_Y
+        self._alphabet_to_index = alphabet_to_index
+        self._buffers = DPBuffers(len(ref) + 1, max_read_length + 1) if DPBuffers is not None else None
 
     def align(self, read: str) -> AlignmentResult:
         """
         Align a read Y against the reference X provided at initialization.
+        Returns a full AlignmentResult.
         """
         flex_input = FlexInput(**self.config, Y=read)
-        return self.flex_dp(
-            flex_input,
-            return_data=self.return_data,
-        )
-    
+        if CYTHON_AVAILABLE:
+            return run_flex_dp_fast(flex_input)
+        return run_flex_dp(flex_input)
+
     def align_batch(self, reads: Iterable[str]) -> Iterable[AlignmentResult]:
         """
-        Align a batch of reads against the reference X provided at initialization.
+        Align a batch of reads against the reference X.
         """
         for read in reads:
             yield self.align(read)
 
-    def simple_output(self, result: AlignmentResult, readlen: Optional[int] = None) -> dict:
+    def align_simple(self, read: str) -> dict:
         """
-        Convert an AlignmentResult into a simple dict with score and CIGAR.
+        Align a read and return a simple dict with score, start_pos, cigar,
+        and aligned_bases.
         """
-        start_pos, cigar = alignment_to_cigar(
-            result.path,
-            lenX=self.reflen,
-            lenY=readlen,
+        if not CYTHON_AVAILABLE:
+            _cython_not_available_error()
+
+        Y_codes = _encode_sequence(read, self._alphabet_to_index)
+        score, start_pos, cigar, _ = nwflex_dp_core(
+            self._X_codes,
+            Y_codes,
+            self._score_matrix,
+            self._gap_open,
+            self._gap_extend,
+            self._ep_counts,
+            self._ep_starts,
+            self._ep_ends,
+            self._free_X,
+            self._free_Y,
+            self._buffers,
         )
-        ## number of aligned bases in read
-        aligned_bases = _op_length_total(cigar, {'M'})        
+        aligned_bases = _op_length_total(cigar, {"M"})
         return {
-            "score": result.score,
+            "score": score,
             "aligned_bases": aligned_bases,
             "start_pos": start_pos,
             "cigar": cigar,
         }
 
-    def align_simple(self, read: str) -> dict:
-        """
-        Align a read and return a simple dict with score and CIGAR.
-        """
-        if self.fast_cigar_only and self.flex_dp is run_flex_dp_fast:
-            flex_input = FlexInput(**self.config, Y=read)
-            score, start_pos, cigar = run_flex_dp_fast_path(
-                flex_input,
-                return_cigar=True,
-            )
-            aligned_bases = _op_length_total(cigar, {"M"})
-            return {
-                "score": score,
-                "aligned_bases": aligned_bases,
-                "start_pos": start_pos,
-                "cigar": cigar,
-            }
-        result = self.align(read)
-        ans = self.simple_output(result, readlen=len(read))
-        return ans
-    
     def align_batch_simple(self, reads: Iterable[str]) -> Iterable[dict]:
         """
         Align a batch of reads and return simple dicts with score and CIGAR.
         """
         for read in reads:
-            if self.fast_cigar_only and self.flex_dp is run_flex_dp_fast:
-                flex_input = FlexInput(**self.config, Y=read)
-                score, start_pos, cigar = run_flex_dp_fast_path(
-                    flex_input,
-                    return_cigar=True,
-                )
-                aligned_bases = _op_length_total(cigar, {"M"})
-                yield {
-                    "score": score,
-                    "aligned_bases": aligned_bases,
-                    "start_pos": start_pos,
-                    "cigar": cigar,
-                }
-                continue
-            result = self.align(read)
-            ans = self.simple_output(result, readlen=len(read))
-            yield ans
+            yield self.align_simple(read)

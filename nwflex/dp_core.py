@@ -245,9 +245,9 @@ def init_matrices(config: FlexInput) -> FlexData:
     EP = config.extra_predecessors
 
     # Scores
-    Yg = np.full((n + 1, m + 1), -np.inf, dtype=float)
-    M  = np.full((n + 1, m + 1), -np.inf, dtype=float)
-    Xg = np.full((n + 1, m + 1), -np.inf, dtype=float)
+    Yg = np.full((n + 1, m + 1), -np.inf, dtype=np.float32)
+    M  = np.full((n + 1, m + 1), -np.inf, dtype=np.float32)
+    Xg = np.full((n + 1, m + 1), -np.inf, dtype=np.float32)
 
     # Traceback (state IDs: 0=Yg, 1=M, 2=Xg)
     Yg_trace = np.full((n + 1, m + 1), -1, dtype=int)
@@ -478,7 +478,7 @@ def traceback_alignment(
         ## check terminal predecessor set EP[n+1], or 
         ## at minimum, the value at n, m.
         if len(EP) > n + 1 and EP[n + 1]:
-            terminal_rows = list(EP[n + 1]) + [n]  # baseline n is implicit
+            terminal_rows = [n] + list(EP[n + 1])  # check baseline n first
         else:
             terminal_rows = [n]  # global alignment in X: only row n
 
