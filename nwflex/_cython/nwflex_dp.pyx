@@ -69,7 +69,8 @@ cdef class DPBuffers:
         self.Xg_row = np.empty((max_nrows, max_ncols), dtype=np.int32)
 
         # Path buffer: max path length is max_nrows + max_ncols
-        self.path = np.empty((max_nrows + max_ncols, 3), dtype=np.int32)
+        # Path buffer: traceback can produce up to n+m entries plus trailing gaps
+        self.path = np.empty((2 * (max_nrows + max_ncols), 3), dtype=np.int32)
 
         # CIGAR ops buffer: one byte per op, max length is 2 * (max_nrows + max_ncols)
         # Extra space for terminal N ops
