@@ -24,7 +24,7 @@ cimport numpy as cnp
 cimport cython
 from libc.string cimport memset
 
-ctypedef cnp.float64_t DTYPE_t
+ctypedef cnp.float32_t DTYPE_t
 ctypedef cnp.int32_t   ITYPE_t
 
 
@@ -56,9 +56,9 @@ cdef class DPBuffers:
         self.max_ncols = max_ncols
 
         # Score matrices
-        self.Yg = np.empty((max_nrows, max_ncols), dtype=np.float64)
-        self.M  = np.empty((max_nrows, max_ncols), dtype=np.float64)
-        self.Xg = np.empty((max_nrows, max_ncols), dtype=np.float64)
+        self.Yg = np.empty((max_nrows, max_ncols), dtype=np.float32)
+        self.M  = np.empty((max_nrows, max_ncols), dtype=np.float32)
+        self.Xg = np.empty((max_nrows, max_ncols), dtype=np.float32)
 
         # Trace matrices
         self.Yg_tr = np.empty((max_nrows, max_ncols), dtype=np.int32)
@@ -159,9 +159,9 @@ def nwflex_dp_core(
     cdef DTYPE_t NEG_INF = <DTYPE_t>(-1e300)
 
     # Allocate numpy arrays (these are returned to Python)
-    cdef cnp.ndarray[DTYPE_t, ndim=2] Yg_np = np.empty((nrows, ncols), dtype=np.float64)
-    cdef cnp.ndarray[DTYPE_t, ndim=2]  M_np = np.empty((nrows, ncols), dtype=np.float64)
-    cdef cnp.ndarray[DTYPE_t, ndim=2] Xg_np = np.empty((nrows, ncols), dtype=np.float64)
+    cdef cnp.ndarray[DTYPE_t, ndim=2] Yg_np = np.empty((nrows, ncols), dtype=np.float32)
+    cdef cnp.ndarray[DTYPE_t, ndim=2]  M_np = np.empty((nrows, ncols), dtype=np.float32)
+    cdef cnp.ndarray[DTYPE_t, ndim=2] Xg_np = np.empty((nrows, ncols), dtype=np.float32)
 
     cdef cnp.ndarray[ITYPE_t, ndim=2] Yg_tr_np = np.empty((nrows, ncols), dtype=np.int32)
     cdef cnp.ndarray[ITYPE_t, ndim=2]  M_tr_np = np.empty((nrows, ncols), dtype=np.int32)

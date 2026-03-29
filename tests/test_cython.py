@@ -128,27 +128,21 @@ class TestCythonVsPython:
 def _dp_tables_equivalent(a: np.ndarray, b: np.ndarray) -> bool:
     """
     Check if two DP tables are functionally equivalent.
-    
-    Python uses float('-inf') which becomes np.inf, while Cython uses -1e300.
-    Both represent "unreachable" states, so we treat them as equivalent.
+
+    Unreachable cells are -inf in both Python and Cython (float32).
+    Reachable cells must be close.
     """
-    # Threshold for "effectively -inf" (Cython uses -1e300)
-    NEG_INF_THRESHOLD = -1e200
-    
-    # Create masks for "effectively -inf" values
-    a_neginf = a < NEG_INF_THRESHOLD
-    b_neginf = b < NEG_INF_THRESHOLD
-    
-    # Both should have -inf in the same places
+    a_neginf = np.isneginf(a)
+    b_neginf = np.isneginf(b)
+
     if not np.array_equal(a_neginf, b_neginf):
         return False
-    
-    # For non-inf values, they should be close
+
     finite_mask = ~a_neginf
     if np.any(finite_mask):
         if not np.allclose(a[finite_mask], b[finite_mask]):
             return False
-    
+
     return True
 
 

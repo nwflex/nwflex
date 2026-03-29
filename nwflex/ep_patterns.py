@@ -142,9 +142,9 @@ def build_EP_STR_phase(n: int, s: int, e: int, k: int) -> List[List[int]]:
     Notes
     -----
     * As above, 0 ≤ s < e ≤ n.
-    * If e+1 > n (no B), there is no closer row and the E(e+1) rule is
-      simply skipped.
-    * EP[n+1] is empty for global alignment (traceback starts at row n).
+    * If e == n (no B), there is no closer row e+1 in the DP table, so we
+      apply the closer pattern to the terminal predecessor set EP[n+1].
+      This allows traceback to exit the repeat block at the correct phase.
     """
     if not (0 <= s < e <= n):
         raise ValueError(f"Invalid block indices: need 0 ≤ s < e ≤ n, got s={s}, e={e}, n={n}")
@@ -164,7 +164,12 @@ def build_EP_STR_phase(n: int, s: int, e: int, k: int) -> List[List[int]]:
             start = max(s + 1, e - k + 1)
             EP[i].extend(range(start, e))  # note: excluding baseline e
 
-    # EP[n+1] remains empty for global alignment
+    # If e == n (B is empty), apply closer pattern to terminal set
+    if e == n:
+        EP[n + 1].append(s)
+        start = max(s + 1, e - k + 1)
+        EP[n + 1].extend(range(start, e))
+
     return EP
 
 # ---------------------------------------------------------------------------

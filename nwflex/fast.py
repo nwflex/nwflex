@@ -226,6 +226,7 @@ def run_flex_dp_fast(
     # Encode sequences as integer codes
     X_codes = _encode_sequence(config.X, config.alphabet_to_index)
     Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
+    score_matrix = np.ascontiguousarray(config.score_matrix, dtype=np.float32)
 
     # Convert EP list-of-lists -> interval arrays
     ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
@@ -243,7 +244,7 @@ def run_flex_dp_fast(
     ) = nwflex_dp_core(
         X_codes,
         Y_codes,
-        config.score_matrix,
+        score_matrix,
         config.gap_open,
         config.gap_extend,
         ep_counts,
@@ -310,6 +311,7 @@ def run_flex_dp_fast_path(
     # TODO: cache X_codes and EP interval encoding per aligner/locus.
     X_codes = _encode_sequence(config.X, config.alphabet_to_index)
     Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
+    score_matrix = np.ascontiguousarray(config.score_matrix, dtype=np.float32)
     ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
 
     if return_data:
@@ -327,7 +329,7 @@ def run_flex_dp_fast_path(
         ) = nwflex_dp_core(
             X_codes,
             Y_codes,
-            config.score_matrix,
+            score_matrix,
             config.gap_open,
             config.gap_extend,
             ep_counts,
@@ -352,7 +354,7 @@ def run_flex_dp_fast_path(
         score, path_array = nwflex_dp_core(
             X_codes,
             Y_codes,
-            config.score_matrix,
+            score_matrix,
             config.gap_open,
             config.gap_extend,
             ep_counts,
@@ -419,12 +421,13 @@ def run_flex_dp_fast_buffered(
 
     X_codes = _encode_sequence(config.X, config.alphabet_to_index)
     Y_codes = _encode_sequence(config.Y, config.alphabet_to_index)
+    score_matrix = np.ascontiguousarray(config.score_matrix, dtype=np.float32)
     ep_counts, ep_starts, ep_ends = ep_to_intervals(config.extra_predecessors)
 
     score, path_array = nwflex_dp_core_buffered(
         X_codes,
         Y_codes,
-        config.score_matrix,
+        score_matrix,
         config.gap_open,
         config.gap_extend,
         ep_counts,

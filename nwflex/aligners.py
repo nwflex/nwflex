@@ -546,7 +546,7 @@ class RefAligner:
         fast_mode: bool = False,
         fast_traceback: bool = True,
         fast_cigar_only: bool = False,
-        max_read_len: int = 300,
+        max_read_length: int = 300,
     ):
         self.config = dict()
         self.config["X"] = ref
@@ -578,9 +578,9 @@ class RefAligner:
                 extra_predecessors
             )
             # Create reusable DP buffers
-            self._buffers = DPBuffers(len(ref) + 1, max_read_len + 1)
+            self._buffers = DPBuffers(len(ref) + 1, max_read_length + 1)
             # Cache scoring parameters for direct Cython calls
-            self._score_matrix = np.ascontiguousarray(score_matrix, dtype=np.float64)
+            self._score_matrix = np.ascontiguousarray(score_matrix, dtype=np.float32)
             self._gap_open = gap_open
             self._gap_extend = gap_extend
             self._free_X = free_X
