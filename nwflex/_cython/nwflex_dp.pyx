@@ -1489,6 +1489,13 @@ def nwflex_dp_core_buffered_cigar(
 
         pi = ci
 
+    # Terminal contraction: if the path ended before row n,
+    # the remaining rows were contracted via EP[n+1]
+    if not free_X and pi < n:
+        for r in range(n - pi):
+            cigar_ops[cigar_len] = 78  # 'N'
+            cigar_len += 1
+
     # Run-length encode CIGAR ops to string
     if cigar_len == 0:
         return (best_score, start_pos if start_pos >= 0 else -1, "")

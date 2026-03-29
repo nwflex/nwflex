@@ -83,6 +83,7 @@ def alignment_to_cigar(
         path: Sequence[Tuple[int, int, int]],
         lenX: Optional[int] = None,
         lenY: Optional[int] = None,
+        free_X: bool = False,
 ) -> Tuple[int, str]:
     """
     Convert an AlignmentResult path to a CIGAR string.
@@ -143,6 +144,11 @@ def alignment_to_cigar(
             ## gap in Y
             cigar_states.append('D')
         pi= i
+
+    ## terminal contraction: if the path ended before row lenX,
+    ## the remaining rows were contracted via EP[n+1]
+    if not free_X and pi < lenX:
+        cigar_states.extend(['N'] * (lenX - pi))
 
     cigar_list = rle_ops(cigar_states)
     cigar_str = _write_cigar(cigar_list)

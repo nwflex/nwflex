@@ -478,7 +478,7 @@ def traceback_alignment(
         ## check terminal predecessor set EP[n+1], or 
         ## at minimum, the value at n, m.
         if len(EP) > n + 1 and EP[n + 1]:
-            terminal_rows = list(EP[n + 1]) + [n]  # baseline n is implicit
+            terminal_rows = [n] + list(EP[n + 1])  # check baseline n first
         else:
             terminal_rows = [n]  # global alignment in X: only row n
 

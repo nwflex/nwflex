@@ -139,6 +139,7 @@ def path_array_to_cigar(
     *,
     lenX: int,
     lenY: int,
+    free_X: bool = False,
 ) -> tuple[int, str]:
     """
     Compute start_pos and CIGAR from a path array.
@@ -178,6 +179,11 @@ def path_array_to_cigar(
         else:
             cigar_states.append("D")
         pi = i
+
+    # Terminal contraction: if the path ended before row lenX,
+    # the remaining rows were contracted via EP[n+1]
+    if not free_X and pi < lenX:
+        cigar_states.extend(["N"] * (lenX - pi))
 
     if not cigar_states:
         return int(start_pos), ""
