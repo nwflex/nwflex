@@ -132,7 +132,7 @@ def build_EP_STR_phase(n: int, s: int, e: int, k: int) -> List[List[int]]:
     We use the phase-preserving pattern:
 
         E(i)   = {s}                    if s < i ≤ e
-        E(e+1) = {s, e-k+1, …, e-1}     if e ≤ n [note: excluding baseline e]
+        E(e+1) = {s, e-k+1, …, e-1}     if e < n [note: excluding baseline e]
         E(i)   = ∅                      otherwise
 
     This preserves motif phase at the exit by providing one exit row
@@ -144,7 +144,8 @@ def build_EP_STR_phase(n: int, s: int, e: int, k: int) -> List[List[int]]:
     * As above, 0 ≤ s < e ≤ n.
     * If e == n (no B), there is no closer row e+1 in the DP table, so we
       apply the closer pattern to the terminal predecessor set EP[n+1].
-      This allows traceback to exit the repeat block at the correct phase.
+      This allows traceback to start from the correct phase row within the
+      flex block, matching the behaviour of build_EP_single_block.
     """
     if not (0 <= s < e <= n):
         raise ValueError(f"Invalid block indices: need 0 ≤ s < e ≤ n, got s={s}, e={e}, n={n}")
@@ -152,15 +153,15 @@ def build_EP_STR_phase(n: int, s: int, e: int, k: int) -> List[List[int]]:
         raise ValueError(f"Motif length k must be positive, got k={k}")
 
     # n+2 entries: indices 0..n for DP rows, index n+1 for terminal set
-    EP: List[List[int]] = [[] for _ in range(n + 2)]    
+    EP: List[List[int]] = [[] for _ in range(n + 2)]
+    
     for i in range(1, n + 1):
-        # add leader row
         if s < i <= e:
+            # Inside Z: EP(i) = {s}
             EP[i].append(s)
         elif i == e + 1 and e + 1 <= n:
-            # leader row
+            # Closer row: EP(e+1) = {s, e-k+1, ..., e-1}
             EP[i].append(s)
-            # last k rows of Z
             start = max(s + 1, e - k + 1)
             EP[i].extend(range(start, e))  # note: excluding baseline e
 

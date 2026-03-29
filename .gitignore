@@ -59,4 +59,6 @@ Thumbs.db
 *.png 
 *.gif
 
-optimization
+# pdfs from notebooks
+notebooks/pdfs
+
