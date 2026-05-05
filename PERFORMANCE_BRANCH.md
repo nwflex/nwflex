@@ -75,9 +75,9 @@ configurations: BWA-MEM at standard parameters; BWA-MEM with the
 soft-clip penalty raised so high that clipping never improves the
 score; and NW-flex with the STR-aware EP pattern from Notebook 4.
 
-For NW-flex we use an extended reference with $3N$ repeat copies, so
-the EP pattern enumerates a comfortable window of expansions relative 
-to $N$. For BWA-MEM we align the read in both orientations and
+For NW-flex we use an extended reference with $3N$ repeat copies, 
+so the EP pattern can match haplotype counts both below and 
+above $N$. For BWA-MEM we align the read in both orientations and
 take the better-scoring strand, so the comparison does not penalise
 BWA-MEM for orientation artifacts.
 
@@ -146,8 +146,8 @@ as the notebook drives demand — the goal is for intermediate states
 to run, not for any one area to be finished first.
 
 **Notebook**
-- [ ] Instantiate outline
-- [ ] Compose introduction with explanation and purpose
+- [x] Instantiate outline
+- [x] Compose introduction with explanation and purpose
 - [ ] Setup cell, imports, scoring carry-through
 - [ ] Simulation setup — locus, haplotype, reads
 - [ ] Three alignment configurations
@@ -157,6 +157,7 @@ to run, not for any one area to be finished first.
 - [ ] Summary
 
 **Package code**
+- [ ] Load default parameters for different score schema
 - [ ] Panel loading and locus construction
 - [ ] Haplotype and read tiling
 - [ ] BWA-MEM wrapper, including the forward + reverse-complement comparison
