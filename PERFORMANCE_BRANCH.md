@@ -35,8 +35,7 @@ one row per locus, columns:
     pind, chr, start_38, stop_38, strand, type,
     lflank, rflank, ms_seq, ref_score_per_base
 
-The panel lives at `data/hg38_motif_sample_K100.tsv` (filename
-provisional).
+The panel lives at `data/hg38_motif_sample_K100.tsv`
 
 We may opt to add a separate appendix notebook to document how to run
 TRF and how the panel is built from a TRF run. There is code and instructions
