@@ -157,7 +157,7 @@ to run, not for any one area to be finished first.
 - [ ] Summary
 
 **Package code**
-- [ ] Load default parameters for different score schema
+- [x] Load default parameters for different score schema
 - [ ] Panel loading and locus construction
 - [ ] Haplotype and read tiling
 - [ ] BWA-MEM wrapper, including the forward + reverse-complement comparison
