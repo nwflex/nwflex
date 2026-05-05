@@ -35,7 +35,7 @@ one row per locus, columns:
     pind, chr, start_38, stop_38, strand, type,
     lflank, rflank, ms_seq, ref_score_per_base
 
-The panel lives at `data/wgs.motif_catalog_K100.panel.v2.tsv` (filename
+The panel lives at `data/hg38_motif_sample_K100.tsv` (filename
 provisional).
 
 We may opt to add a separate appendix notebook to document how to run
@@ -112,7 +112,7 @@ The same heatmap now reads differently. NW-flex remains correct in
 the regime where it has flank overhang, but not always. Sometimes,
 the local sequence and variant have a higher value alignment. 
 The no-clip arm — the one that recovered the easy cases above — now 
-fails on the reads whose seed crosses the SNV.
+fails on the reads that cross the SNV.
 
 ### Third validation — compound repeat
 
