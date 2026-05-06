@@ -85,7 +85,7 @@ A read is correct under a method if the method recovers the
 repeat-region length encoded in the haplotype and has a non-trivial
 left and right flank extent. We use CIGAR-based length decoders.
 
-### First validation — length variation only
+### First comparison — length variation only
 
 We run the simulation above with the haplotype flanks left untouched
 and the repeat count varying over $N + \Delta$ for a small range of
@@ -99,9 +99,9 @@ even though the haplotype differs from the reference only in the
 repeat count. The no-clip arm recovers some of these cases but not
 all.
 
-### Second validation — a single SNV in the flank
+### Second comparison — a single SNV in the flank
 
-We repeat the first validation with one change: the haplotype carries
+We repeat the first comparison with one change: the haplotype carries
 a single SNV at a fixed position. We choose for our example a single
 base change in the left flank, one base outside
 the repeat boundary. The locus, the read tiling, and the alignment
@@ -113,9 +113,9 @@ the local sequence and variant have a higher value alignment.
 The no-clip arm — the one that recovered the easy cases above — now 
 fails on the reads that cross the SNV.
 
-### Third validation — compound repeat
+### Third comparison — compound repeat
 
-The third validation changes the locus structure. The reference is
+The third comparison changes the locus structure. The reference is
 built from two adjacent repeat motifs joined by a short interrupting
 sequence,
 $X = A \cdot R_1^{N_1} \cdot M \cdot R_2^{N_2} \cdot B$, and the
@@ -148,25 +148,25 @@ to run, not for any one area to be finished first.
 **Notebook**
 - [x] Instantiate outline
 - [x] Compose introduction with explanation and purpose
-- [ ] Setup cell, imports, scoring carry-through
-- [ ] Simulation setup — locus, haplotype, reads
+- [x] Setup cell, imports, scoring carry-through
+- [x] Simulation setup — locus, haplotype, reads
 - [ ] Three alignment configurations
-- [ ] First validation — length variation
-- [ ] Second validation — SNV in flank
-- [ ] Third validation — compound repeat
+- [ ] First comparison — length variation
+- [ ] Second comparison — SNV in flank
+- [ ] Third comparison — compound repeat
 - [ ] Summary
 
 **Package code**
 - [x] Load default parameters for different score schema
-- [ ] Panel loading and locus construction
-- [ ] Haplotype and read tiling
+- [x] Panel loading and locus construction
+- [x] Haplotype and read tiling
 - [ ] BWA-MEM wrapper, including the forward + reverse-complement comparison
 - [ ] NW-flex wrapper for the simulation use case
 - [ ] CIGAR decoding for repeat-region length
 - [ ] Compound-repeat helpers
 
 **Data and tests**
-- [ ] Panel TSV in `data/`
+- [x] Panel TSV in `data/`
 - [ ] Tests covering the new modules
 
 **Repo plumbing**
