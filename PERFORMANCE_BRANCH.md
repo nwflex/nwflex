@@ -78,8 +78,9 @@ score; and NW-flex with the STR-aware EP pattern from Notebook 4.
 For NW-flex we use an extended reference with $3N$ repeat copies, 
 so the EP pattern can match haplotype counts both below and 
 above $N$. For BWA-MEM we align the read in both orientations and
-take the better-scoring strand, so the comparison does not penalise
-BWA-MEM for orientation artifacts.
+credit it if either run finds the truth — Smith-Waterman tie-breaking
+depends on DP cell evaluation order, so running both orientations
+removes that artifact.
 
 A read is correct under a method if the method recovers the
 repeat-region length encoded in the haplotype and has a non-trivial
@@ -150,24 +151,31 @@ to run, not for any one area to be finished first.
 - [x] Compose introduction with explanation and purpose
 - [x] Setup cell, imports, scoring carry-through
 - [x] Simulation setup — locus, haplotype, reads
-- [ ] Three alignment configurations
+- [x] Three alignment configurations (BWA-MEM std/no-clip + NW-flex,
+      with closer-look render_zoom views, the correctness rule, and
+      the inequivalence-of-orientations demo motivating both-strands BWA)
 - [ ] First comparison — length variation
 - [ ] Second comparison — SNV in flank
 - [ ] Third comparison — compound repeat
 - [ ] Summary
 
-**Package code**
+**Package code** (lives in `nwflex/simulation/`, a package split into
+`core.py` and `viz.py`)
 - [x] Load default parameters for different score schema
 - [x] Panel loading and locus construction
 - [x] Haplotype and read tiling
-- [ ] BWA-MEM wrapper, including the forward + reverse-complement comparison
-- [ ] NW-flex wrapper for the simulation use case
-- [ ] CIGAR decoding for repeat-region length
+- [x] BWA-MEM wrappers — `align_bwa` (single-strand) and
+      `align_bwa_both_strands` (both orientations)
+- [x] CIGAR utilities — `parse_cigar`, `decode_z_bp`,
+      `flank_bases_consumed`, `is_arm_correct`, `rc_to_forward_alignment`
+- [x] Alignment visualization — `render_zoom` (in `simulation.viz`)
+- [x] NW-flex setup stays inline in the notebook (3N STRLocus + EP
+      pattern + RefAligner; no wrapper, by design)
 - [ ] Compound-repeat helpers
 
 **Data and tests**
 - [x] Panel TSV in `data/`
-- [ ] Tests covering the new modules
+- [x] Tests covering the new modules — 81 in `tests/test_simulation.py`
 
 **Repo plumbing**
 - [ ] Add the notebook to `notebooks/build_pdf.sh`
