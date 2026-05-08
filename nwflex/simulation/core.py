@@ -949,19 +949,21 @@ def alignment_state(
     min_flank: int = 1,
 ) -> str:
     """
-    Classify a single alignment against the truth into one of four states.
+    Classify a single alignment against the truth into one of four
+    states.  Each state has a two-symbol code: the first symbol is the
+    alignment outcome (``✓`` correct, ``✗`` wrong), the second is the
+    chosen alignment's NW score relative to truth's NW score (``=``
+    tied, ``<`` chosen below truth, ``>`` chosen above truth):
 
-    - ``"P"`` (Pass): the chosen CIGAR recovers the truth z-bp under
-      :func:`is_arm_correct`.
-    - ``"T"`` (Tied): chosen does not recover truth, but its NW score
-      equals the truth alignment's NW score.  The aligner *could* have
-      picked truth; tie-break landed elsewhere.
-    - ``"M"`` (Missed): chosen wrong, ``chosen_score < truth_score``.
-      Truth strictly dominates; the aligner's heuristic left score on
-      the table.
-    - ``"D"`` (Outscored): chosen wrong, ``chosen_score > truth_score``.
-      The score landscape strictly prefers a wrong alignment — truth
-      was outscored.
+    - ``"P"`` (``✓ =``): the chosen CIGAR recovers the truth z-bp under
+      :func:`is_arm_correct` — alignment correct, score trivially equal.
+    - ``"T"`` (``✗ =``): alignment wrong, but ``chosen_score ==
+      truth_score``.  The aligner *could* have picked truth; tie-break
+      landed elsewhere.
+    - ``"M"`` (``✗ <``): alignment wrong, ``chosen_score < truth_score``.
+      The aligner's heuristic settled for less than truth.
+    - ``"D"`` (``✗ >``): alignment wrong, ``chosen_score > truth_score``.
+      The scoring landscape prefers a wrong alignment over truth.
 
     Unmapped reads (``cigar`` or ``pos_1based`` ``None``) classify as
     ``"D"``.
@@ -981,6 +983,26 @@ def alignment_state(
 
 
 _STATE_PRIORITY = {"P": 0, "T": 1, "M": 2, "D": 3}
+
+
+def combine_states(state_a: str, state_b: str, policy: str = "best") -> str:
+    """
+    Combine two :func:`alignment_state` classifications into one.
+
+    Priority order is ``P > T > M > D`` (lower priority number = better).
+
+    - ``"best"`` returns whichever state is *better*: the cell counts as a
+      pass when *either* strand passes.
+    - ``"worst"`` returns whichever is *worse*: the cell counts as a pass
+      only when *both* strands pass.
+    """
+    if policy not in ("best", "worst"):
+        raise ValueError(f"policy must be 'best' or 'worst', got {policy!r}")
+    a_pri = _STATE_PRIORITY[state_a]
+    b_pri = _STATE_PRIORITY[state_b]
+    if policy == "best":
+        return state_a if a_pri <= b_pri else state_b
+    return state_a if a_pri >= b_pri else state_b
 
 
 class BwaBothStrandsState(NamedTuple):

@@ -40,6 +40,7 @@ from .core import (
     rc_to_forward_alignment,
     bwa_verdict_both_strands,
     alignment_state,
+    combine_states,
     bwa_state_both_strands,
     BwaBothStrandsState,
     score_alignment,
@@ -49,7 +50,7 @@ from .core import (
     _parse_sam_line,
 )
 
-from .viz import render_zoom, plot_correctness_heatmap
+from .viz import render_zoom, plot_correctness_heatmap, plot_layout_schematic
 
 
 __all__ = [
@@ -75,6 +76,7 @@ __all__ = [
     "rc_to_forward_alignment",
     "bwa_verdict_both_strands",
     "alignment_state",
+    "combine_states",
     "bwa_state_both_strands",
     "BwaBothStrandsState",
     "score_alignment",
@@ -83,4 +85,5 @@ __all__ = [
     # Viz
     "render_zoom",
     "plot_correctness_heatmap",
+    "plot_layout_schematic",
 ]

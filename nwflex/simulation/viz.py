@@ -173,36 +173,244 @@ def render_zoom(
     return "\n".join(out)
 
 
-class _SplitCellHandle:
-    """Sentinel for the split-cell legend entry."""
+class _CircleHandle:
+    """Sentinel for a circle-only legend entry."""
 
-    def __init__(self, lower_color: str, upper_color: str):
-        self.lower_color = lower_color
-        self.upper_color = upper_color
+    def __init__(self, color: str):
+        self.color = color
 
 
-def _make_split_cell_handler():
+def _make_circle_handler():
     from matplotlib.legend_handler import HandlerBase
-    from matplotlib.patches import Polygon as _Polygon
+    from matplotlib.patches import Circle as _Circle
 
-    class _SplitCellHandler(HandlerBase):
+    class _CircleHandler(HandlerBase):
         def create_artists(self, legend, orig_handle, xdescent, ydescent,
                            width, height, fontsize, trans):
-            bl = (-xdescent, -ydescent)
-            br = (-xdescent + width, -ydescent)
-            tl = (-xdescent, -ydescent + height)
-            tr = (-xdescent + width, -ydescent + height)
-            lower = _Polygon(
-                [bl, br, tl], facecolor=orig_handle.lower_color,
-                edgecolor="#bbbbbb", linewidth=0.5, transform=trans,
-            )
-            upper = _Polygon(
-                [tr, br, tl], facecolor=orig_handle.upper_color,
-                edgecolor="#bbbbbb", linewidth=0.5, transform=trans,
-            )
-            return [lower, upper]
+            r = 0.42 * min(width, height)
+            return [_Circle(
+                (-xdescent + width / 2, -ydescent + height / 2), r,
+                facecolor=orig_handle.color, edgecolor="#222222",
+                linewidth=0.6, transform=trans,
+            )]
 
-    return _SplitCellHandler()
+    return _CircleHandler()
+
+
+def plot_layout_schematic(
+    *,
+    motif: str,
+    ref_n: int,
+    delta_example: int = 2,
+    snv: Mapping | None = None,
+    read_lflank_example: float | None = None,
+    read_rflank_example: float | None = None,
+    fontsize: int = 14,
+    figsize: tuple = (11.5, 3.0),
+    suptitle: str | None = None,
+    subtitle: str | None = None,
+):
+    """
+    Standalone explainer figure showing how the heatmap's two axes map
+    to the locus geometry: a REF row, a HAP row carrying ``Δ`` extra
+    motif copies (or missing copies when ``delta_example < 0``), and a
+    READ row whose left overhang demonstrates ``lflank extent``.
+
+    Parameters
+    ----------
+    motif, ref_n
+        Locus motif (e.g. ``"AAC"``) and reference repeat count.
+    delta_example
+        Number of extra (positive) or missing (negative) motif copies
+        on the haplotype, used purely to illustrate the X axis.
+    snv
+        Optional ``{"offset_from_boundary": int}`` to render a small SNV
+        marker on the haplotype's left flank.
+    read_lflank_example, read_rflank_example
+        Read overhang widths (axis units) shown in the READ row.  Pass
+        ``None`` to use sensible defaults.
+    fontsize, figsize
+        Standard matplotlib knobs.
+    suptitle, subtitle
+        Optional headings drawn above the schematic.
+    """
+    import matplotlib.pyplot as plt
+
+    fig, ax = plt.subplots(figsize=figsize)
+    schematic_dict = {
+        "motif": motif,
+        "ref_n": int(ref_n),
+        "delta_example": int(delta_example),
+    }
+    if snv is not None:
+        schematic_dict["snv"] = dict(snv)
+    if read_lflank_example is not None:
+        schematic_dict["read_lflank_example"] = float(read_lflank_example)
+    if read_rflank_example is not None:
+        schematic_dict["read_rflank_example"] = float(read_rflank_example)
+
+    _draw_schematic(ax, schematic=schematic_dict, fontsize=fontsize)
+
+    title_size = fontsize + 3
+    label_size = fontsize + 1
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=title_size, fontweight="bold", y=0.98)
+    if subtitle is not None:
+        sub_y = 0.90 if suptitle is not None else 0.95
+        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+                 fontsize=label_size, style="italic", color="#444444")
+    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.88 if suptitle else 0.96))
+    return fig
+
+
+def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
+    """
+    Draw the explainer banner that connects the heatmap's axes to the
+    physical layout: a REF row, a HAP row showing ``Δ`` extra/missing
+    motif copies, and a READ row whose left overhang demonstrates the
+    ``lflank extent`` (Y axis).
+    """
+    from matplotlib.patches import FancyBboxPatch, Rectangle
+
+    motif: str = schematic["motif"]
+    ref_n: int = int(schematic["ref_n"])
+    delta_ex: int = int(schematic.get("delta_example", 2))
+    snv = schematic.get("snv")  # optional dict: {"offset_from_boundary": int}
+
+    hap_n = ref_n + delta_ex
+    if hap_n < 0:
+        hap_n = 0  # clamp for visual purposes; never expected in practice
+
+    # Layout constants (axis units).
+    flank_w = 6.5
+    tile_w  = 1.4
+    bar_h   = 0.7
+    label_x = -0.6  # x for the row labels (REF / HAP / READ)
+
+    ref_repeat_w = ref_n * tile_w
+    hap_repeat_w = hap_n * tile_w
+
+    y_read = 5.2
+    y_hap  = 3.4
+    y_ref  = 1.6
+
+    flank_color  = "#e8e8e8"
+    motif_color  = "#a6cee3"
+    extra_color  = "#fdd49e"  # extra motif copies on the haplotype
+    missing_edge = "#c0392b"  # outline for missing copies (when delta < 0)
+    read_color   = "#9ecae1"
+    snv_color    = "#c0392b"
+
+    def _row_label(y, text):
+        ax.text(label_x, y + bar_h / 2, text, ha="right", va="center",
+                fontsize=fontsize - 1, fontweight="bold", color="#333333")
+
+    def _flank_box(x, y, w, label):
+        ax.add_patch(Rectangle((x, y), w, bar_h, facecolor=flank_color,
+                               edgecolor="#888888", linewidth=0.7))
+        ax.text(x + w / 2, y + bar_h / 2, label, ha="center", va="center",
+                fontsize=fontsize - 3, color="#666666", style="italic")
+
+    def _motif_tile(x, y, color):
+        ax.add_patch(Rectangle((x, y), tile_w, bar_h, facecolor=color,
+                               edgecolor="#444444", linewidth=0.6))
+        ax.text(x + tile_w / 2, y + bar_h / 2, motif, ha="center", va="center",
+                fontsize=fontsize - 4, family="monospace", color="#222222")
+
+    # --- REF row ---------------------------------------------------------
+    _row_label(y_ref, "REF")
+    _flank_box(0, y_ref, flank_w, "left flank")
+    for i in range(ref_n):
+        _motif_tile(flank_w + i * tile_w, y_ref, motif_color)
+    _flank_box(flank_w + ref_repeat_w, y_ref, flank_w, "right flank")
+    ax.text(flank_w + ref_repeat_w / 2, y_ref - 0.42,
+            f"repeat zone — ref N = {ref_n} × |{motif}|",
+            ha="center", va="top", fontsize=fontsize - 2, color="#444444")
+
+    # --- HAP row ---------------------------------------------------------
+    _row_label(y_hap, "HAP")
+    _flank_box(0, y_hap, flank_w, "left flank")
+    # Shared (un-changed) motif copies: min(ref_n, hap_n) tiles.
+    shared = min(ref_n, hap_n)
+    for i in range(shared):
+        _motif_tile(flank_w + i * tile_w, y_hap, motif_color)
+    if delta_ex > 0:
+        # extra copies highlighted
+        for i in range(ref_n, hap_n):
+            _motif_tile(flank_w + i * tile_w, y_hap, extra_color)
+    elif delta_ex < 0:
+        # ghost outline for missing copies, drawn after HAP's right flank position
+        for i in range(hap_n, ref_n):
+            x = flank_w + i * tile_w
+            ax.add_patch(Rectangle((x, y_hap), tile_w, bar_h,
+                                    facecolor="none", edgecolor=missing_edge,
+                                    linewidth=1.0, linestyle=(0, (3, 2))))
+            ax.text(x + tile_w / 2, y_hap + bar_h / 2, motif,
+                    ha="center", va="center", fontsize=fontsize - 4,
+                    family="monospace", color=missing_edge, alpha=0.6)
+    _flank_box(flank_w + hap_repeat_w, y_hap, flank_w, "right flank")
+
+    # Δ bracket above HAP, spanning the changed region.
+    if delta_ex != 0:
+        delta_x_a = flank_w + min(ref_n, hap_n) * tile_w
+        delta_x_b = flank_w + max(ref_n, hap_n) * tile_w
+        ax.annotate(
+            "", xy=(delta_x_a, y_hap + bar_h + 0.10),
+            xytext=(delta_x_b, y_hap + bar_h + 0.10),
+            arrowprops=dict(arrowstyle="<->", color=missing_edge, lw=1.4),
+        )
+        ax.text((delta_x_a + delta_x_b) / 2, y_hap + bar_h + 0.30,
+                f"Δ = {delta_ex:+d} motif copies   →   X-axis",
+                ha="center", va="bottom",
+                fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
+
+    # SNV marker on HAP (optional).
+    if snv is not None:
+        off = int(snv.get("offset_from_boundary", 2))  # bp left of repeat boundary
+        # mark inside the left flank, near the repeat boundary
+        snv_x = flank_w - (off / max(off + 2, 4)) * (flank_w * 0.35)
+        ax.plot([snv_x], [y_hap + bar_h / 2], marker="v",
+                color=snv_color, markersize=8, zorder=6)
+        ax.text(snv_x, y_hap + bar_h + 0.05, f"SNV ({off}bp)",
+                ha="center", va="bottom",
+                fontsize=fontsize - 3, color=snv_color)
+
+    # --- READ row --------------------------------------------------------
+    _row_label(y_read, "READ")
+    # Pick example overhangs to make lflank-extent readable. Right flank
+    # overhang is implied by the fixed read length but not annotated.
+    read_lflank_ex = float(schematic.get("read_lflank_example", flank_w * 0.45))
+    read_rflank_ex = float(schematic.get("read_rflank_example", flank_w * 0.30))
+    read_x0 = flank_w - read_lflank_ex
+    read_x1 = flank_w + hap_repeat_w + read_rflank_ex
+    ax.add_patch(FancyBboxPatch(
+        (read_x0, y_read), read_x1 - read_x0, bar_h,
+        boxstyle="round,pad=0.02,rounding_size=0.18",
+        facecolor=read_color, edgecolor="#08519c", linewidth=0.9,
+    ))
+    ax.text((read_x0 + read_x1) / 2, y_read + bar_h / 2,
+            "read (covers the whole repeat + some flank on each side)",
+            ha="center", va="center", fontsize=fontsize - 3, color="#08306b")
+
+    # lflank extent bracket between read's left edge and repeat boundary.
+    ax.annotate(
+        "", xy=(read_x0, y_read - 0.10),
+        xytext=(flank_w, y_read - 0.10),
+        arrowprops=dict(arrowstyle="<->", color="#08519c", lw=1.4),
+    )
+    ax.text((read_x0 + flank_w) / 2, y_read - 0.40,
+            "lflank extent  →  Y-axis",
+            ha="center", va="top",
+            fontsize=fontsize - 1, color="#08519c", fontweight="bold")
+
+    # Frame.
+    x_max = flank_w * 2 + max(ref_repeat_w, hap_repeat_w) + 0.6
+    ax.set_xlim(label_x - 1.0, x_max)
+    ax.set_ylim(0.6, y_read + bar_h + 0.8)
+    ax.set_xticks([])
+    ax.set_yticks([])
+    for spine in ax.spines.values():
+        spine.set_visible(False)
 
 
 def plot_correctness_heatmap(
@@ -211,34 +419,40 @@ def plot_correctness_heatmap(
     deltas: Iterable[int],
     lflanks: Iterable[int],
     arm_titles: Mapping[str, str],
-    color_pass: str = "#08519c",        # dark blue
-    color_tied: str = "#6baed6",        # light blue
-    color_missed: str = "#ffffff",      # white
-    color_outscored: str = "#c0392b",   # red
+    color_recovered: str = "#08519c",    # dark blue
+    color_co_optimal: str = "#6baed6",   # light blue
+    color_dominant: str = "#ffffff",     # white
+    color_dominated: str = "#c0392b",    # red
     color_nan: str = "#cccccc",
     fontsize: int = 14,
+    suptitle: str | None = None,
+    subtitle: str | None = None,
 ):
     """
-    Three-panel four-state "two-triangle" heatmap for a
-    (Δ × lflank × arm) sweep.
+    Three-panel four-state heatmap for a (Δ × lflank × arm) sweep.
 
-    Each cell is split diagonally (no edge between halves):
+    Each cell carries two always-on symbols:
 
-    - lower-left triangle = forward strand
-    - upper-right triangle = reverse-complement strand
+    - the **box** (filling the cell) is colored by the forward-strand
+      verdict;
+    - the **circle** at the cell's center is colored by the
+      reverse-complement strand's verdict.
 
-    Cells where the two strands classify the same render as a single
-    flat color; cells where the strands disagree show two colors split
-    along the cell's anti-diagonal.  For single-strand arms (e.g.
-    NW-flex), set ``fwd_state == rc_state`` and the cell renders as
-    one color.
+    For single-strand arms (e.g. NW-flex), set ``fwd_state == rc_state``
+    and the box and circle render in the same color.
 
-    Each state's color:
+    State colors are labeled by a two-symbol code in the legend.  The
+    first symbol is the alignment outcome (``✓`` correct, ``✗`` wrong);
+    the second symbol is the chosen alignment's NW score relative to
+    truth's NW score (``=`` tied, ``<`` chosen lower than truth, ``>``
+    chosen higher than truth):
 
-    - ``"P"`` (pass)      → dark blue
-    - ``"T"`` (tied)      → light blue
-    - ``"M"`` (missed)    → white
-    - ``"D"`` (outscored) → red
+    - ``"P"`` ``✓ =`` → dark blue   (alignment correct; score equals truth)
+    - ``"T"`` ``✗ =`` → light blue  (alignment wrong; score equals truth)
+    - ``"M"`` ``✗ <`` → white       (alignment wrong; chosen scores below
+      truth — the aligner's heuristic settled for less)
+    - ``"D"`` ``✗ >`` → red         (alignment wrong; chosen scores above
+      truth — the scoring landscape rejects truth)
     - NaN (infeasible / missing) → grey
 
     Parameters
@@ -260,7 +474,7 @@ def plot_correctness_heatmap(
     """
     import numpy as np
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch, Polygon, Rectangle
+    from matplotlib.patches import Circle, Patch, Rectangle
 
     deltas = list(deltas)
     lflanks = list(lflanks)
@@ -271,10 +485,10 @@ def plot_correctness_heatmap(
     title_size = fontsize + 3
 
     state_to_color = {
-        "P": color_pass,
-        "T": color_tied,
-        "M": color_missed,
-        "D": color_outscored,
+        "P": color_recovered,
+        "T": color_co_optimal,
+        "M": color_dominant,
+        "D": color_dominated,
     }
 
     def color_of(state):
@@ -306,27 +520,17 @@ def plot_correctness_heatmap(
             for di, D in enumerate(deltas):
                 fwd_c = color_of(fwd_grid.iat[li, di])
                 rc_c  = color_of(rc_grid.iat[li, di])
-                if fwd_c == rc_c:
-                    # Strands agree — single rectangle, no diagonal seam.
-                    ax.add_patch(Rectangle(
-                        (D - 0.5, L - 0.5), 1, 1,
-                        facecolor=fwd_c, edgecolor="none", linewidth=0,
-                    ))
-                else:
-                    # Strands disagree — two triangles meeting on the
-                    # anti-diagonal.
-                    bl = (D - 0.5, L - 0.5)
-                    br = (D + 0.5, L - 0.5)
-                    tl = (D - 0.5, L + 0.5)
-                    tr = (D + 0.5, L + 0.5)
-                    ax.add_patch(Polygon(
-                        [bl, br, tl], facecolor=fwd_c, edgecolor="none",
-                        linewidth=0, antialiased=False,
-                    ))
-                    ax.add_patch(Polygon(
-                        [tr, br, tl], facecolor=rc_c, edgecolor="none",
-                        linewidth=0, antialiased=False,
-                    ))
+                # Box (always) = forward strand verdict.
+                ax.add_patch(Rectangle(
+                    (D - 0.5, L - 0.5), 1, 1,
+                    facecolor=fwd_c, edgecolor="none", linewidth=0,
+                ))
+                # Circle (always) = reverse-complement strand verdict.
+                ax.add_patch(Circle(
+                    (D, L), 0.26,
+                    facecolor=rc_c, edgecolor="#222222", linewidth=0.6,
+                    zorder=4,
+                ))
 
         ax.set_xlim(deltas[0] - 0.5, deltas[-1] + 0.5)
         ax.set_ylim(lflanks[0] - 0.5, lflanks[-1] + 0.5)
@@ -349,30 +553,61 @@ def plot_correctness_heatmap(
         ax.set_title(arm_titles[arm], fontsize=title_size)
     axes[0].set_ylabel("lflank extent", fontsize=label_size)
 
-    legend_handles = [
-        Patch(facecolor=color_pass,      edgecolor="#bbbbbb", label="pass"),
-        Patch(facecolor=color_tied,      edgecolor="#bbbbbb", label="tied"),
-        Patch(facecolor=color_missed,    edgecolor="#bbbbbb", label="missed"),
-        Patch(facecolor=color_outscored, edgecolor="#bbbbbb", label="outscored"),
-        _SplitCellHandle(lower_color=color_outscored, upper_color=color_pass),
+    shape_color = "#999999"
+    blank = Patch(facecolor="none", edgecolor="none")
+    # Single legend laid out as a 4-row × 2-col grid.  Matplotlib fills
+    # column-by-column (col 1 top→bottom, then col 2), so entries are
+    # ordered: 4 verdict-color rows (col 1), then 2 strand-shape rows
+    # plus 2 blanks (col 2).
+    interleaved_handles = [
+        Patch(facecolor=color_recovered,  edgecolor="#bbbbbb"),
+        Patch(facecolor=color_co_optimal, edgecolor="#bbbbbb"),
+        Patch(facecolor=color_dominant,   edgecolor="#bbbbbb"),
+        Patch(facecolor=color_dominated,  edgecolor="#bbbbbb"),
+        Patch(facecolor=shape_color, edgecolor="#222222", linewidth=0.6),
+        _CircleHandle(color=shape_color),
+        blank,
+        blank,
     ]
-    legend_labels = [
-        "pass", "tied", "missed", "outscored",
-        "forward \\ reverse",
+    interleaved_labels = [
+        "✓ align, score = truth",
+        "✗ align, score = truth",
+        "✗ align, score < truth",
+        "✗ align, score > truth",
+        "forward",
+        "reverse",
+        "",
+        "",
     ]
-    fig.subplots_adjust(right=0.74)
+
+    panel_top = 0.86 if suptitle else 0.92
+    fig.subplots_adjust(right=0.70, top=panel_top, bottom=0.10)
+
+    legend_y = 0.5 * panel_top + 0.05
     fig.legend(
-        handles=legend_handles,
-        labels=legend_labels,
-        handler_map={_SplitCellHandle: _make_split_cell_handler()},
+        handles=interleaved_handles,
+        labels=interleaved_labels,
+        handler_map={_CircleHandle: _make_circle_handler()},
+        ncol=2,
         loc="center left",
-        bbox_to_anchor=(0.76, 0.5),
+        bbox_to_anchor=(0.72, legend_y),
         frameon=True,
         fontsize=fontsize,
         handlelength=1.6,
         handleheight=1.6,
         handletextpad=0.8,
+        columnspacing=1.6,
         labelspacing=1.0,
         borderpad=0.8,
     )
+
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.97,
+                     fontweight="bold")
+    if subtitle is not None:
+        sub_y = 0.93 if suptitle is not None else 0.95
+        # Center on the panel area (not the whole figure, which includes legend).
+        cx = (axes[0].get_position().x0 + axes[-1].get_position().x1) / 2
+        fig.text(cx, sub_y, subtitle, ha="center", va="top",
+                 fontsize=label_size, style="italic", color="#444444")
     return fig
