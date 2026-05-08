@@ -38,11 +38,18 @@ from .core import (
     flank_bases_consumed,
     is_arm_correct,
     rc_to_forward_alignment,
+    bwa_verdict_both_strands,
+    alignment_state,
+    bwa_state_both_strands,
+    BwaBothStrandsState,
+    score_alignment,
+    bwa_truth_cigar,
+    nwflex_truth_cigar,
     # Internal SAM parser (used by tests)
     _parse_sam_line,
 )
 
-from .viz import render_zoom
+from .viz import render_zoom, plot_correctness_heatmap
 
 
 __all__ = [
@@ -66,6 +73,14 @@ __all__ = [
     "flank_bases_consumed",
     "is_arm_correct",
     "rc_to_forward_alignment",
+    "bwa_verdict_both_strands",
+    "alignment_state",
+    "bwa_state_both_strands",
+    "BwaBothStrandsState",
+    "score_alignment",
+    "bwa_truth_cigar",
+    "nwflex_truth_cigar",
     # Viz
     "render_zoom",
+    "plot_correctness_heatmap",
 ]

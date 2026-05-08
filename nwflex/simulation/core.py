@@ -10,7 +10,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Any, List, NamedTuple, Optional, Tuple
 
 from nwflex.repeats import STRLocus
 
@@ -774,3 +774,345 @@ def rc_to_forward_alignment(
     fwd_pos = ref_length - (rc_pos - 1) - ref_consumed + 1
     fwd_cigar = "".join(f"{length}{op}" for length, op in reversed(ops))
     return fwd_pos, fwd_cigar
+
+
+def score_alignment(
+    read: str,
+    ref: str,
+    pos_1based: int,
+    cigar: str,
+    *,
+    score_matrix: Any,
+    gap_open: float,
+    gap_extend: float,
+    alphabet_to_index: Any,
+) -> float:
+    """
+    Score an alignment described by ``(pos_1based, cigar)`` against
+    ``ref`` and ``read`` under the affine-gap scheme used elsewhere in
+    this notebook (and by ``RefAligner``).
+
+    This is a Needleman-Wunsch-style global score: every CIGAR op
+    contributes, with no edge bonuses or position-dependent
+    adjustments.  It is the right thing to compare to the value
+    reported by NW-flex's ``RefAligner.align_simple`` (they match by
+    construction), but **does not** match BWA-MEM's reported SW
+    ``AS:i:`` tag in general — BWA's AS is the local-extension maximum,
+    which can land at an interior cell when the optimal global path
+    dips through an indel.
+
+    Per-base match/mismatch contributions come from ``score_matrix``
+    (indexed via ``alphabet_to_index``).  A gap of length ``L`` costs
+    ``gap_open + L * gap_extend`` (signs as supplied — typically both
+    negative).  ``N`` (skipped reference) is free; ``S`` (soft-clip)
+    consumes read bases at no cost; ``H`` and ``P`` contribute nothing.
+
+    Parameters
+    ----------
+    read : str
+        Forward-strand read sequence the CIGAR was produced against.
+    ref : str
+        Reference sequence the CIGAR is anchored to.
+    pos_1based : int
+        1-based reference position of the first aligned read base
+        (SAM ``POS``).
+    cigar : str
+        CIGAR string.
+
+    Returns
+    -------
+    float
+        Total alignment score under the supplied scoring scheme.
+    """
+    ops = parse_cigar(cigar)
+    ref_pos = pos_1based - 1
+    read_pos = 0
+    score = 0.0
+    for length, op in ops:
+        if op in ("M", "=", "X"):
+            for _ in range(length):
+                score += score_matrix[
+                    alphabet_to_index[ref[ref_pos]]
+                ][alphabet_to_index[read[read_pos]]]
+                ref_pos += 1
+                read_pos += 1
+        elif op == "I":
+            score += gap_open + length * gap_extend
+            read_pos += length
+        elif op == "D":
+            score += gap_open + length * gap_extend
+            ref_pos += length
+        elif op == "N":
+            ref_pos += length
+        elif op == "S":
+            read_pos += length
+        elif op in ("H", "P"):
+            pass
+        else:
+            raise ValueError(f"unknown CIGAR op: {op!r}")
+    return score
+
+
+def bwa_truth_cigar(
+    read,
+    hap,
+    locus: STRLocus,
+) -> Tuple[int, str]:
+    """
+    Construct the natural truth alignment of ``read`` against the locus
+    reference (suitable for BWA-MEM verdict comparison).
+
+    The shape is ``L M  Δ·|R| {I,D}  (body_ref + Rf) M``: lflank matches,
+    a single insertion or deletion at the lflank–zone boundary covering
+    the haplotype/reference body-length difference, then body-and-rflank
+    matches.  Mismatches (e.g. SNVs in the haplotype) sit inside the M
+    runs and are accounted for when the CIGAR is scored against the
+    actual sequences via :func:`score_alignment`.
+
+    Parameters
+    ----------
+    read : Read
+        Output of :func:`tile_reads`.
+    hap : Haplotype
+        Source haplotype (provides ``body_len``).
+    locus : STRLocus
+        Reference locus (provides flank length, motif, and ref ``N``).
+
+    Returns
+    -------
+    (int, str)
+        1-based start position and CIGAR.
+    """
+    L  = read.lflank_extent
+    Rf = read.rflank_extent
+    body_hap = hap.body_len
+    body_ref = locus.k * locus.N
+    pos = (locus.s - L) + 1
+    if body_hap == body_ref:
+        return pos, f"{L + body_hap + Rf}M"
+    if body_hap > body_ref:
+        return pos, f"{L}M{body_hap - body_ref}I{body_ref + Rf}M"
+    return pos, f"{L}M{body_ref - body_hap}D{body_hap + Rf}M"
+
+
+def nwflex_truth_cigar(
+    read,
+    hap,
+    nwflex_locus: STRLocus,
+) -> Tuple[int, str]:
+    """
+    Construct the natural truth alignment of ``read`` against the NW-flex
+    extended (3N) reference: lflank matches, a free EP skip (``N`` op)
+    covering the unused motifs, then (haplotype body + rflank) matches.
+
+    The NW-flex reference is built with at least as many motifs as any
+    haplotype in the sweep, so the skip is non-negative.
+
+    Parameters
+    ----------
+    read : Read
+    hap : Haplotype
+    nwflex_locus : STRLocus
+        Extended (e.g. 3N) reference locus.  Must satisfy
+        ``nwflex_locus.k * nwflex_locus.N >= hap.body_len``.
+
+    Returns
+    -------
+    (int, str)
+        1-based start position and CIGAR.
+    """
+    L  = read.lflank_extent
+    Rf = read.rflank_extent
+    body_hap = hap.body_len
+    body_ref = nwflex_locus.k * nwflex_locus.N
+    skip = body_ref - body_hap
+    if skip < 0:
+        raise ValueError(
+            f"hap body {body_hap} exceeds NW-flex ref body {body_ref}"
+        )
+    pos = (nwflex_locus.s - L) + 1
+    if skip == 0:
+        return pos, f"{L + body_hap + Rf}M"
+    return pos, f"{L}M{skip}N{body_hap + Rf}M"
+
+
+def alignment_state(
+    cigar: Optional[str],
+    pos_1based: Optional[int],
+    chosen_score: Optional[float],
+    truth_score: float,
+    z_start: int,
+    z_end: int,
+    truth_z_bp: int,
+    *,
+    convention: str,
+    min_flank: int = 1,
+) -> str:
+    """
+    Classify a single alignment against the truth into one of four states.
+
+    - ``"P"`` (Pass): the chosen CIGAR recovers the truth z-bp under
+      :func:`is_arm_correct`.
+    - ``"T"`` (Tied): chosen does not recover truth, but its NW score
+      equals the truth alignment's NW score.  The aligner *could* have
+      picked truth; tie-break landed elsewhere.
+    - ``"M"`` (Missed): chosen wrong, ``chosen_score < truth_score``.
+      Truth strictly dominates; the aligner's heuristic left score on
+      the table.
+    - ``"D"`` (Outscored): chosen wrong, ``chosen_score > truth_score``.
+      The score landscape strictly prefers a wrong alignment — truth
+      was outscored.
+
+    Unmapped reads (``cigar`` or ``pos_1based`` ``None``) classify as
+    ``"D"``.
+    """
+    if cigar is None or pos_1based is None or chosen_score is None:
+        return "D"
+    if is_arm_correct(
+        cigar, pos_1based, z_start, z_end, truth_z_bp,
+        convention=convention, min_flank=min_flank,
+    ):
+        return "P"
+    if chosen_score > truth_score:
+        return "D"
+    if chosen_score < truth_score:
+        return "M"
+    return "T"
+
+
+_STATE_PRIORITY = {"P": 0, "T": 1, "M": 2, "D": 3}
+
+
+class BwaBothStrandsState(NamedTuple):
+    """Combined plus per-strand BWA alignment state classifications."""
+    state: str        #: combined state under the ``combine`` policy
+    fwd_state: str    #: forward-strand state ("P", "T", "M", or "D")
+    rc_state: str     #: reverse-complement-strand state
+
+    @property
+    def strands_disagree(self) -> bool:
+        return self.fwd_state != self.rc_state
+
+
+def bwa_state_both_strands(
+    both: "BwaBothStrandsResult",
+    z_start: int,
+    z_end: int,
+    truth_z_bp: int,
+    ref_length: int,
+    truth_nw_score: float,
+    read_seq: str,
+    ref_seq: str,
+    *,
+    score_matrix: Any,
+    gap_open: float,
+    gap_extend: float,
+    alphabet_to_index: Any,
+    min_flank: int = 1,
+    combine: str = "best",
+) -> BwaBothStrandsState:
+    """
+    Classify a both-strands BWA alignment against the truth.
+
+    Scores both strands (rc flipped to forward coords) under the same
+    NW affine-gap formula as the truth and classifies each via
+    :func:`alignment_state`.  Returns the combined state plus the
+    individual fwd and rc states so the caller can render or
+    aggregate either view.
+
+    Combination policy (state priority ``P > T > M > D``):
+
+    - ``"best"`` (default) — the *better* of the two strands.  Gives
+      BWA every benefit of the doubt about tie-break direction (one
+      strand getting it right is enough).
+    - ``"worst"`` — the *worse* of the two strands.  Treats BWA as only
+      as good as its weakest direction; a cell is Pass only when both
+      strands pass.
+    """
+    if combine not in ("best", "worst"):
+        raise ValueError(f"combine must be 'best' or 'worst', got {combine!r}")
+    fwd_score = score_alignment(
+        read_seq, ref_seq, both.fwd.pos, both.fwd.cigar,
+        score_matrix=score_matrix, gap_open=gap_open,
+        gap_extend=gap_extend, alphabet_to_index=alphabet_to_index,
+    )
+    fwd_state = alignment_state(
+        both.fwd.cigar, both.fwd.pos, fwd_score, truth_nw_score,
+        z_start, z_end, truth_z_bp, convention="bwa", min_flank=min_flank,
+    )
+    rc_pos, rc_cigar = rc_to_forward_alignment(
+        both.rc.pos, both.rc.cigar, ref_length,
+    )
+    rc_score = score_alignment(
+        read_seq, ref_seq, rc_pos, rc_cigar,
+        score_matrix=score_matrix, gap_open=gap_open,
+        gap_extend=gap_extend, alphabet_to_index=alphabet_to_index,
+    )
+    rc_state = alignment_state(
+        rc_cigar, rc_pos, rc_score, truth_nw_score,
+        z_start, z_end, truth_z_bp, convention="bwa", min_flank=min_flank,
+    )
+    if combine == "best":
+        chosen = (
+            fwd_state
+            if _STATE_PRIORITY[fwd_state] <= _STATE_PRIORITY[rc_state]
+            else rc_state
+        )
+    else:  # "worst"
+        chosen = (
+            fwd_state
+            if _STATE_PRIORITY[fwd_state] >= _STATE_PRIORITY[rc_state]
+            else rc_state
+        )
+    return BwaBothStrandsState(
+        state=chosen, fwd_state=fwd_state, rc_state=rc_state,
+    )
+
+
+def bwa_verdict_both_strands(
+    both: BwaBothStrandsResult,
+    z_start: int,
+    z_end: int,
+    truth_z_bp: int,
+    ref_length: int,
+    *,
+    min_flank: int = 1,
+) -> bool:
+    """
+    Per-read verdict for a both-strands BWA-MEM alignment.
+
+    Returns ``True`` iff *either* the forward-strand or the reverse-
+    complement-strand hit recovers the truth on the given repeat zone.
+    The rc strand is flipped to forward coordinates via
+    :func:`rc_to_forward_alignment` before the check, so both strands
+    are scored against the same ``(z_start, z_end)`` interval.
+
+    Smith-Waterman tie-breaking depends on DP cell evaluation order,
+    so the two strands can return different (equally optimal)
+    alignments; OR-ing their verdicts removes that artifact.
+
+    Parameters
+    ----------
+    both : BwaBothStrandsResult
+        Output of :func:`align_bwa_both_strands` for one read.
+    z_start, z_end : int
+        Half-open repeat interval in the forward reference (0-based).
+    truth_z_bp : int
+        Ground-truth read bp inside the repeat interval.
+    ref_length : int
+        Length of the reference (used to flip rc → forward).
+    min_flank : int, default 1
+        Minimum reference bp consumed in each flank.
+    """
+    fwd_ok = is_arm_correct(
+        both.fwd.cigar, both.fwd.pos, z_start, z_end, truth_z_bp,
+        convention="bwa", min_flank=min_flank,
+    )
+    rc_pos, rc_cigar = rc_to_forward_alignment(
+        both.rc.pos, both.rc.cigar, ref_length,
+    )
+    rc_ok = is_arm_correct(
+        rc_cigar, rc_pos, z_start, z_end, truth_z_bp,
+        convention="bwa", min_flank=min_flank,
+    )
+    return bool(fwd_ok or rc_ok)
