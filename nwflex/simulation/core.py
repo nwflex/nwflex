@@ -464,6 +464,62 @@ def reverse_complement(seq: str) -> str:
     return seq.translate(_COMP_TABLE)[::-1]
 
 
+def build_mirror_frame(
+    reference: str,
+    reads: List[Read],
+    zone: Tuple[int, int],
+) -> Tuple[str, List[Read], Tuple[int, int]]:
+    """
+    Build the mirror (reverse-complement) frame of a simulation.
+
+    The mirror frame is the reverse-complemented view of the forward
+    simulation: the reference is reverse-complemented, each read is
+    reverse-complemented (with its ``lflank_extent`` and
+    ``rflank_extent`` swapped, since left and right flanks swap under
+    rc), and the half-open repeat interval is mapped into rc-reference
+    coordinates.
+
+    Built into the simulation by design so every aligner can be
+    evaluated on both orientations on equal footing.
+
+    Parameters
+    ----------
+    reference : str
+        Forward reference sequence.
+    reads : list of Read
+        Reads tiled against the forward reference.
+    zone : (int, int)
+        Half-open repeat interval ``(z_start, z_end)`` in the forward
+        reference (0-based).
+
+    Returns
+    -------
+    rc_reference : str
+        ``reverse_complement(reference)``.
+    rc_reads : list of Read
+        Each read with its sequence reverse-complemented and its
+        ``lflank_extent`` / ``rflank_extent`` swapped.  ``var_start``
+        is carried through unchanged.
+    rc_zone : (int, int)
+        The repeat interval in rc-reference coordinates,
+        ``(len(reference) - z_end, len(reference) - z_start)``.
+    """
+    z_start, z_end = zone
+    n = len(reference)
+    rc_reference = reverse_complement(reference)
+    rc_reads = [
+        Read(
+            sequence=reverse_complement(r.sequence),
+            var_start=r.var_start,
+            lflank_extent=r.rflank_extent,
+            rflank_extent=r.lflank_extent,
+        )
+        for r in reads
+    ]
+    rc_zone = (n - z_end, n - z_start)
+    return rc_reference, rc_reads, rc_zone
+
+
 @dataclass(frozen=True)
 class BwaBothStrandsResult:
     """

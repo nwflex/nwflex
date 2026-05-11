@@ -32,6 +32,7 @@ from .core import (
     align_bwa,
     align_bwa_both_strands,
     reverse_complement,
+    build_mirror_frame,
     # CIGAR parsing + Z decoding
     parse_cigar,
     decode_z_bp,
@@ -68,6 +69,7 @@ __all__ = [
     "align_bwa",
     "align_bwa_both_strands",
     "reverse_complement",
+    "build_mirror_frame",
     # CIGAR + Z
     "parse_cigar",
     "decode_z_bp",

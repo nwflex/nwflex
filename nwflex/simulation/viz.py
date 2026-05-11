@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Iterable, Mapping
 
-from .core import parse_cigar
+from .core import parse_cigar, reverse_complement
 
 
 def render_zoom(
@@ -206,15 +206,18 @@ def plot_layout_schematic(
     read_lflank_example: float | None = None,
     read_rflank_example: float | None = None,
     fontsize: int = 14,
-    figsize: tuple = (11.5, 3.0),
+    figsize: tuple = (13.0, 4.8),
     suptitle: str | None = None,
     subtitle: str | None = None,
+    mirror: bool = False,
+    flanks_aligned: bool = True,
+    ax=None,
 ):
     """
-    Standalone explainer figure showing how the heatmap's two axes map
-    to the locus geometry: a REF row, a HAP row carrying ``Δ`` extra
-    motif copies (or missing copies when ``delta_example < 0``), and a
-    READ row whose left overhang demonstrates ``lflank extent``.
+    Standalone explainer figure for the simulation geometry: a
+    Reference row on top, a Haplotype row carrying ``Δ`` extra motif
+    copies (or missing copies when ``delta_example < 0``), and a Read
+    row whose left overhang illustrates ``lflank extent``.
 
     Parameters
     ----------
@@ -236,11 +239,25 @@ def plot_layout_schematic(
     """
     import matplotlib.pyplot as plt
 
-    fig, ax = plt.subplots(figsize=figsize)
+    standalone = ax is None
+    if standalone:
+        fig, ax = plt.subplots(figsize=figsize)
+    else:
+        fig = ax.figure
+    # Force a white figure background and white axes face so the
+    # rendering looks the same in light and dark IDE themes — this
+    # matters most for ``fig.suptitle`` text, which sits on the
+    # figure background (not the axes) and otherwise reads black-on-
+    # black in dark mode.
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
     schematic_dict = {
         "motif": motif,
         "ref_n": int(ref_n),
         "delta_example": int(delta_example),
+        "mirror": bool(mirror),
+        "flanks_aligned": bool(flanks_aligned),
     }
     if snv is not None:
         schematic_dict["snv"] = dict(snv)
@@ -253,57 +270,115 @@ def plot_layout_schematic(
 
     title_size = fontsize + 3
     label_size = fontsize + 1
-    if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size, fontweight="bold", y=0.98)
-    if subtitle is not None:
-        sub_y = 0.90 if suptitle is not None else 0.95
-        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
-                 fontsize=label_size, style="italic", color="#444444")
-    fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.88 if suptitle else 0.96))
+    if subtitle is None:
+        bp = int(ref_n) * len(str(motif))
+        sub_motif = reverse_complement(motif) if mirror else motif
+        subtitle = (
+            f"Repeat zone: $Z = (\\mathrm{{{sub_motif}}})^{{{ref_n}}}$ "
+            f"= ${bp}$ bp"
+        )
+
+    if standalone:
+        if suptitle is not None:
+            fig.suptitle(suptitle, fontsize=title_size, fontweight="bold",
+                         y=0.98, color="#222222")
+        if subtitle:
+            sub_y = 0.90 if suptitle is not None else 0.95
+            fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+                     fontsize=label_size, style="italic", color="#444444")
+        fig.tight_layout(rect=(0.0, 0.0, 1.0, 0.88 if suptitle else 0.96))
+    else:
+        # Subplot mode: render the suptitle as the axes title, and the
+        # subtitle as a small italic line just below it.  The caller
+        # owns any figure-level suptitle.
+        if suptitle is not None:
+            ax.set_title(suptitle, fontsize=title_size, fontweight="bold",
+                         color="#222222", pad=label_size + 6)
+        if subtitle:
+            ax.text(0.5, 1.0, subtitle, transform=ax.transAxes,
+                    ha="center", va="bottom",
+                    fontsize=label_size - 1, style="italic", color="#444444")
     return fig
 
 
 def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
     """
-    Draw the explainer banner that connects the heatmap's axes to the
-    physical layout: a REF row, a HAP row showing ``Δ`` extra/missing
-    motif copies, and a READ row whose left overhang demonstrates the
-    ``lflank extent`` (Y axis).
+    Draw the explainer banner: a Reference row on top, a Haplotype row
+    in the middle showing ``Δ`` extra/missing motif copies, and a
+    Read stack at the bottom illustrating the read-tiling at varying
+    lflank/rflank balances.
+
+    The Reference and Haplotype rows share flank x-positions: when
+    ``delta > 0`` the haplotype's motif tiles are uniformly compressed
+    so all hap_n copies fit the reference's repeat-zone width; when
+    ``delta < 0`` ghost outlines fill the unoccupied portion.  Each
+    read in the stack carries the same motif tiles (showing the repeat
+    inside the read) plus its lflank / rflank slices.
     """
     from matplotlib.patches import FancyBboxPatch, Rectangle
 
     motif: str = schematic["motif"]
     ref_n: int = int(schematic["ref_n"])
     delta_ex: int = int(schematic.get("delta_example", 2))
-    snv = schematic.get("snv")  # optional dict: {"offset_from_boundary": int}
+    snv = schematic.get("snv")
+    mirror: bool = bool(schematic.get("mirror", False))
+    display_motif: str = reverse_complement(motif) if mirror else motif
 
     hap_n = ref_n + delta_ex
     if hap_n < 0:
-        hap_n = 0  # clamp for visual purposes; never expected in practice
+        hap_n = 0
 
-    # Layout constants (axis units).
-    flank_w = 6.5
+    flank_w = 10.0
     tile_w  = 1.4
     bar_h   = 0.7
-    label_x = -0.6  # x for the row labels (REF / HAP / READ)
+    label_x = -0.8
 
+    flanks_aligned = bool(schematic.get("flanks_aligned", True))
     ref_repeat_w = ref_n * tile_w
-    hap_repeat_w = hap_n * tile_w
+    if flanks_aligned:
+        # Both rows span the same total width; haplotype tiles compress
+        # when delta > 0, ghost outlines fill the gap when delta < 0.
+        if hap_n > 0 and delta_ex >= 0:
+            hap_tile_w = ref_repeat_w / hap_n
+        else:
+            hap_tile_w = tile_w
+        hap_repeat_w = ref_repeat_w
+    else:
+        # Repeat zone scales with copy count; haplotype's right flank
+        # shifts to make room (or in for delta < 0).
+        hap_tile_w = tile_w
+        hap_repeat_w = hap_n * tile_w
 
-    y_read = 5.2
-    y_hap  = 3.4
-    y_ref  = 1.6
+    x_max = flank_w * 2 + max(ref_repeat_w, hap_repeat_w) + 0.6
+    # Mirror mode flips the figure horizontally; row labels would end
+    # up on the visual right.  Counter that by anchoring them to the
+    # right side of the data range so they land on the visual left
+    # after ``ax.invert_xaxis()``.
+    row_label_x = (x_max + 0.8) if mirror else label_x
+
+    # Read stack: three reads with varying lflank / rflank balance.
+    # Indices: 0 = bottom (heavy rflank), 2 = top (heavy lflank).
+    read_lflanks = [flank_w * 0.20, flank_w * 0.45, flank_w * 0.70]
+    read_rflanks = [flank_w * 0.70, flank_w * 0.45, flank_w * 0.20]
+    n_reads = len(read_lflanks)
+    read_gap = 0.30
+    y_read_bot = 0.0
+    read_ys = [y_read_bot + k * (bar_h + read_gap) for k in range(n_reads)]
+
+    big_gap = 1.6
+    y_hap = read_ys[-1] + bar_h + big_gap
+    y_ref = y_hap + bar_h + big_gap
 
     flank_color  = "#e8e8e8"
     motif_color  = "#a6cee3"
-    extra_color  = "#fdd49e"  # extra motif copies on the haplotype
-    missing_edge = "#c0392b"  # outline for missing copies (when delta < 0)
-    read_color   = "#9ecae1"
-    snv_color    = "#c0392b"
+    extra_color  = "#fdd49e"
+    missing_edge = "#c0392b"
+    read_outline = "#08519c"
+    snv_color    = "#2ca02c"
 
     def _row_label(y, text):
-        ax.text(label_x, y + bar_h / 2, text, ha="right", va="center",
-                fontsize=fontsize - 1, fontweight="bold", color="#333333")
+        ax.text(row_label_x, y + bar_h / 2, text, ha="right", va="center",
+                fontsize=fontsize + 2, fontweight="bold", color="#333333")
 
     def _flank_box(x, y, w, label):
         ax.add_patch(Rectangle((x, y), w, bar_h, facecolor=flank_color,
@@ -311,102 +386,167 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
         ax.text(x + w / 2, y + bar_h / 2, label, ha="center", va="center",
                 fontsize=fontsize - 3, color="#666666", style="italic")
 
-    def _motif_tile(x, y, color):
-        ax.add_patch(Rectangle((x, y), tile_w, bar_h, facecolor=color,
-                               edgecolor="#444444", linewidth=0.6))
-        ax.text(x + tile_w / 2, y + bar_h / 2, motif, ha="center", va="center",
-                fontsize=fontsize - 4, family="monospace", color="#222222")
+    def _flank_slice(x, y, w):
+        ax.add_patch(Rectangle((x, y), w, bar_h, facecolor=flank_color,
+                               edgecolor="#888888", linewidth=0.5))
 
-    # --- REF row ---------------------------------------------------------
-    _row_label(y_ref, "REF")
+    def _motif_tile(x, y, color, w=tile_w, with_text=True):
+        ax.add_patch(Rectangle((x, y), w, bar_h, facecolor=color,
+                               edgecolor="#444444", linewidth=0.6))
+        if with_text:
+            ax.text(x + w / 2, y + bar_h / 2, display_motif,
+                    ha="center", va="center",
+                    fontsize=fontsize - 4, family="monospace", color="#222222")
+
+    # --- Reference row ---------------------------------------------------
+    _row_label(y_ref, "Reference")
     _flank_box(0, y_ref, flank_w, "left flank")
     for i in range(ref_n):
-        _motif_tile(flank_w + i * tile_w, y_ref, motif_color)
+        _motif_tile(flank_w + i * tile_w, y_ref, motif_color, tile_w)
     _flank_box(flank_w + ref_repeat_w, y_ref, flank_w, "right flank")
-    ax.text(flank_w + ref_repeat_w / 2, y_ref - 0.42,
-            f"repeat zone — ref N = {ref_n} × |{motif}|",
-            ha="center", va="top", fontsize=fontsize - 2, color="#444444")
+    # A / Z / B labels above the Reference, matching library colors:
+    # A=#2060a0 (blue), Z=#c06020 (orange), B=#7030a0 (purple).
+    label_y = y_ref + bar_h + 0.20
+    ax.text(flank_w / 2, label_y, "$A$",
+            ha="center", va="bottom",
+            fontsize=fontsize + 1, fontweight="bold", color="#2060a0")
+    ax.text(flank_w + ref_repeat_w / 2, label_y,
+            f"$Z = (\\mathrm{{{display_motif}}})^{{{ref_n}}}$",
+            ha="center", va="bottom",
+            fontsize=fontsize, color="#c06020")
+    ax.text(flank_w + ref_repeat_w + flank_w / 2, label_y, "$B$",
+            ha="center", va="bottom",
+            fontsize=fontsize + 1, fontweight="bold", color="#7030a0")
 
-    # --- HAP row ---------------------------------------------------------
-    _row_label(y_hap, "HAP")
+    # --- Haplotype row ---------------------------------------------------
+    _row_label(y_hap, "Haplotype")
+    # Continuous haplotype outline so the shape stays whole even when a
+    # delta < 0 leaves an empty gap between the motifs and the right flank.
+    ax.add_patch(Rectangle((0, y_hap), 2 * flank_w + hap_repeat_w, bar_h,
+                           facecolor="none", edgecolor="#888888",
+                           linewidth=0.7, zorder=2))
     _flank_box(0, y_hap, flank_w, "left flank")
-    # Shared (un-changed) motif copies: min(ref_n, hap_n) tiles.
     shared = min(ref_n, hap_n)
     for i in range(shared):
-        _motif_tile(flank_w + i * tile_w, y_hap, motif_color)
+        _motif_tile(flank_w + i * hap_tile_w, y_hap, motif_color, hap_tile_w)
     if delta_ex > 0:
-        # extra copies highlighted
         for i in range(ref_n, hap_n):
-            _motif_tile(flank_w + i * tile_w, y_hap, extra_color)
-    elif delta_ex < 0:
-        # ghost outline for missing copies, drawn after HAP's right flank position
-        for i in range(hap_n, ref_n):
-            x = flank_w + i * tile_w
-            ax.add_patch(Rectangle((x, y_hap), tile_w, bar_h,
-                                    facecolor="none", edgecolor=missing_edge,
-                                    linewidth=1.0, linestyle=(0, (3, 2))))
-            ax.text(x + tile_w / 2, y_hap + bar_h / 2, motif,
-                    ha="center", va="center", fontsize=fontsize - 4,
-                    family="monospace", color=missing_edge, alpha=0.6)
+            _motif_tile(flank_w + i * hap_tile_w, y_hap, extra_color, hap_tile_w)
+    # delta_ex < 0: the haplotype simply has fewer motif copies; we do
+    # not draw any ghost outline or letter for the missing positions.
     _flank_box(flank_w + hap_repeat_w, y_hap, flank_w, "right flank")
 
-    # Δ bracket above HAP, spanning the changed region.
+    # Δ bracket above the haplotype.
     if delta_ex != 0:
-        delta_x_a = flank_w + min(ref_n, hap_n) * tile_w
-        delta_x_b = flank_w + max(ref_n, hap_n) * tile_w
+        if delta_ex > 0:
+            delta_x_a = flank_w + ref_n * hap_tile_w
+            delta_x_b = flank_w + hap_n * hap_tile_w
+        else:
+            delta_x_a = flank_w + hap_n * tile_w
+            delta_x_b = flank_w + ref_n * tile_w
         ax.annotate(
             "", xy=(delta_x_a, y_hap + bar_h + 0.10),
             xytext=(delta_x_b, y_hap + bar_h + 0.10),
             arrowprops=dict(arrowstyle="<->", color=missing_edge, lw=1.4),
         )
         ax.text((delta_x_a + delta_x_b) / 2, y_hap + bar_h + 0.30,
-                f"Δ = {delta_ex:+d} motif copies   →   X-axis",
+                f"$\\Delta = {delta_ex:+d}$ motif copies",
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
 
-    # SNV marker on HAP (optional).
+    # SNV (optional) — a green base-change bar in the haplotype's left
+    # flank, mirrored into every read whose lflank extends over it, with
+    # an arrow from the SNV label down onto the bar.
     if snv is not None:
-        off = int(snv.get("offset_from_boundary", 2))  # bp left of repeat boundary
-        # mark inside the left flank, near the repeat boundary
-        snv_x = flank_w - (off / max(off + 2, 4)) * (flank_w * 0.35)
-        ax.plot([snv_x], [y_hap + bar_h / 2], marker="v",
-                color=snv_color, markersize=8, zorder=6)
-        ax.text(snv_x, y_hap + bar_h + 0.05, f"SNV ({off}bp)",
+        off = int(snv.get("offset_from_boundary", 2))
+        snv_bar_w = 0.18
+        # Position the bar so the grey gap to the repeat boundary equals
+        # the bar's own width.
+        snv_bar_x = flank_w - snv_bar_w - snv_bar_w
+        snv_x = snv_bar_x + snv_bar_w / 2
+
+        # Bar on the haplotype.
+        ax.add_patch(Rectangle((snv_bar_x, y_hap), snv_bar_w, bar_h,
+                               facecolor=snv_color, edgecolor="none",
+                               zorder=5))
+        # Bar on every read whose left edge is to the left of the SNV.
+        for k in range(n_reads):
+            rx0_k = flank_w - read_lflanks[k]
+            if rx0_k < snv_x:
+                ax.add_patch(Rectangle((snv_bar_x, read_ys[k]),
+                                       snv_bar_w, bar_h,
+                                       facecolor=snv_color, edgecolor="none",
+                                       zorder=5))
+
+        # Dimension-line bracket showing the SNV's distance from the
+        # repeat boundary: a thin horizontal segment with tick marks at
+        # each end, spanning from the bar's right edge to the boundary.
+        snv_bar_right = snv_bar_x + snv_bar_w
+        bracket_y = y_hap + bar_h + 0.15
+        tick_h    = 0.10
+        ax.plot([snv_bar_right, flank_w], [bracket_y, bracket_y],
+                color=snv_color, lw=1.2, zorder=4)
+        ax.plot([snv_bar_right, snv_bar_right],
+                [bracket_y - tick_h / 2, bracket_y + tick_h / 2],
+                color=snv_color, lw=1.2, zorder=4)
+        ax.plot([flank_w, flank_w],
+                [bracket_y - tick_h / 2, bracket_y + tick_h / 2],
+                color=snv_color, lw=1.2, zorder=4)
+        bracket_center = (snv_bar_right + flank_w) / 2
+        ax.text(bracket_center, bracket_y + 0.12, f"SNV: {off} bp",
                 ha="center", va="bottom",
-                fontsize=fontsize - 3, color=snv_color)
+                fontsize=fontsize - 1, color=snv_color, fontweight="bold")
 
-    # --- READ row --------------------------------------------------------
-    _row_label(y_read, "READ")
-    # Pick example overhangs to make lflank-extent readable. Right flank
-    # overhang is implied by the fixed read length but not annotated.
-    read_lflank_ex = float(schematic.get("read_lflank_example", flank_w * 0.45))
-    read_rflank_ex = float(schematic.get("read_rflank_example", flank_w * 0.30))
-    read_x0 = flank_w - read_lflank_ex
-    read_x1 = flank_w + hap_repeat_w + read_rflank_ex
-    ax.add_patch(FancyBboxPatch(
-        (read_x0, y_read), read_x1 - read_x0, bar_h,
-        boxstyle="round,pad=0.02,rounding_size=0.18",
-        facecolor=read_color, edgecolor="#08519c", linewidth=0.9,
-    ))
-    ax.text((read_x0 + read_x1) / 2, y_read + bar_h / 2,
-            "read (covers the whole repeat + some flank on each side)",
-            ha="center", va="center", fontsize=fontsize - 3, color="#08306b")
+    # --- Read stack ------------------------------------------------------
+    stack_center = (read_ys[0] + read_ys[-1]) / 2
+    _row_label(stack_center, "Reads")
 
-    # lflank extent bracket between read's left edge and repeat boundary.
+    for k in range(n_reads):
+        yk = read_ys[k]
+        lflank_ex = read_lflanks[k]
+        rflank_ex = read_rflanks[k]
+        rx0 = flank_w - lflank_ex
+        # Left flank slice.
+        _flank_slice(rx0, yk, lflank_ex)
+        # Motif tiles inside the read (no text — already labeled on Hap above).
+        for i in range(hap_n):
+            color = motif_color if i < ref_n else extra_color
+            _motif_tile(flank_w + i * hap_tile_w, yk, color, hap_tile_w,
+                        with_text=False)
+        # Right flank slice.
+        _flank_slice(flank_w + hap_repeat_w, yk, rflank_ex)
+        # Outline around the whole read.
+        rx1 = flank_w + hap_repeat_w + rflank_ex
+        ax.add_patch(FancyBboxPatch(
+            (rx0, yk), rx1 - rx0, bar_h,
+            boxstyle="round,pad=0.02,rounding_size=0.18",
+            facecolor="none", edgecolor=read_outline, linewidth=1.1,
+            zorder=3,
+        ))
+
+    # lflank extent bracket on the topmost read (heaviest lflank).
+    top_y       = read_ys[-1]
+    top_lflank  = read_lflanks[-1]
+    arrow_y     = top_y + bar_h + 0.15  # arrow nudged up ~2 px
+    text_y      = top_y + bar_h + 0.30  # text stays where it was
     ax.annotate(
-        "", xy=(read_x0, y_read - 0.10),
-        xytext=(flank_w, y_read - 0.10),
-        arrowprops=dict(arrowstyle="<->", color="#08519c", lw=1.4),
+        "", xy=(flank_w - top_lflank, arrow_y),
+        xytext=(flank_w, arrow_y),
+        arrowprops=dict(arrowstyle="<->", color=read_outline, lw=1.4),
     )
-    ax.text((read_x0 + flank_w) / 2, y_read - 0.40,
-            "lflank extent  →  Y-axis",
-            ha="center", va="top",
-            fontsize=fontsize - 1, color="#08519c", fontweight="bold")
+    ax.text(flank_w - top_lflank / 2, text_y,
+            "lflank extent",
+            ha="center", va="bottom",
+            fontsize=fontsize - 1, color=read_outline, fontweight="bold")
 
-    # Frame.
-    x_max = flank_w * 2 + max(ref_repeat_w, hap_repeat_w) + 0.6
-    ax.set_xlim(label_x - 1.0, x_max)
-    ax.set_ylim(0.6, y_read + bar_h + 0.8)
+    # Frame.  In mirror mode, extend xlim on the right so the row
+    # labels (anchored past x_max) land at the visual left after invert.
+    if mirror:
+        ax.set_xlim(label_x - 4.5, x_max + 5.0)
+        ax.invert_xaxis()
+    else:
+        ax.set_xlim(label_x - 4.5, x_max)
+    ax.set_ylim(-0.4, y_ref + bar_h + 1.1)
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
@@ -501,7 +641,9 @@ def plot_correctness_heatmap(
     fig, axes = plt.subplots(
         1, n, figsize=(5.0 * n + 2.5, 6.0), sharey=True,
         gridspec_kw={"wspace": 0.06},
+        subplot_kw={"facecolor": "white"},
     )
+    fig.patch.set_facecolor("white")
     if n == 1:
         axes = [axes]
 
@@ -540,7 +682,7 @@ def plot_correctness_heatmap(
         ax.set_xticks(np.array(deltas, dtype=float) - 0.5, minor=True)
         ax.set_yticks(np.array(lflanks, dtype=float) - 0.5, minor=True)
         ax.grid(which="minor", color="#bbbbbb", linewidth=0.5)
-        ax.tick_params(which="major", labelsize=fontsize)
+        ax.tick_params(which="major", labelsize=fontsize, colors="#222222")
         ax.tick_params(which="minor", length=0)
         # Highlight the Δ=0 column (haplotype == reference) when present.
         if 0 in deltas:
@@ -549,9 +691,9 @@ def plot_correctness_heatmap(
                 1, lflanks[-1] - lflanks[0] + 1,
                 fill=False, edgecolor="black", linewidth=1.5, zorder=5,
             ))
-        ax.set_xlabel("Δ (Hap N $-$ Ref N)", fontsize=label_size)
-        ax.set_title(arm_titles[arm], fontsize=title_size)
-    axes[0].set_ylabel("lflank extent", fontsize=label_size)
+        ax.set_xlabel("Δ (Hap N $-$ Ref N)", fontsize=label_size, color="#222222")
+        ax.set_title(arm_titles[arm], fontsize=title_size, color="#222222")
+    axes[0].set_ylabel("lflank extent", fontsize=label_size, color="#222222")
 
     shape_color = "#999999"
     blank = Patch(facecolor="none", edgecolor="none")
@@ -599,11 +741,14 @@ def plot_correctness_heatmap(
         columnspacing=1.6,
         labelspacing=1.0,
         borderpad=0.8,
+        facecolor="white",
+        edgecolor="#444444",
+        labelcolor="#222222",
     )
 
     if suptitle is not None:
         fig.suptitle(suptitle, fontsize=title_size + 1, y=0.97,
-                     fontweight="bold")
+                     fontweight="bold", color="#222222")
     if subtitle is not None:
         sub_y = 0.93 if suptitle is not None else 0.95
         # Center on the panel area (not the whole figure, which includes legend).
