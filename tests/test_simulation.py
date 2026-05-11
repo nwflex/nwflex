@@ -31,6 +31,7 @@ from nwflex.simulation import (
     rc_to_forward_alignment,
     render_zoom,
     reverse_complement,
+    state_to_glyph,
     tile_reads,
 )
 
@@ -965,6 +966,26 @@ class TestRcCigarToForward:
         rc_pos, rc_cigar, ref_len = 7, "3M2D2I8M", 30
         fwd_pos, fwd_cigar = rc_to_forward_alignment(rc_pos, rc_cigar, ref_len)
         assert rc_cigar_to_forward(fwd_pos, fwd_cigar, ref_len) == rc_cigar
+
+
+class TestStateToGlyph:
+    """state_to_glyph — render a P/T/M/D state as length + score glyphs."""
+
+    def test_pass_is_check_equal(self):
+        assert state_to_glyph("P") == "✓  ="
+
+    def test_tied_is_cross_equal(self):
+        assert state_to_glyph("T") == "✗  ="
+
+    def test_missed_is_cross_less(self):
+        assert state_to_glyph("M") == "✗  <"
+
+    def test_dominated_is_cross_greater(self):
+        assert state_to_glyph("D") == "✗  >"
+
+    def test_unknown_state_raises(self):
+        with pytest.raises(ValueError, match="must be one of"):
+            state_to_glyph("X")
 
 
 class TestRcToForwardAlignment:

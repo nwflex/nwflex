@@ -1209,6 +1209,35 @@ def alignment_state(
 
 _STATE_PRIORITY = {"P": 0, "T": 1, "M": 2, "D": 3}
 
+_STATE_GLYPHS = {
+    # length glyph (✓/✗)  +  score glyph (=, <, >) vs truth.
+    "P": "✓  =",
+    "T": "✗  =",
+    "M": "✗  <",
+    "D": "✗  >",
+}
+
+
+def state_to_glyph(state: str) -> str:
+    """
+    Format an :func:`alignment_state` classification as a two-glyph string.
+
+    Each state has a length glyph (``✓`` if the alignment recovers the
+    truth repeat length, ``✗`` otherwise) and a score glyph (``=`` for
+    score equal to truth, ``<`` below truth, ``>`` above truth):
+
+    - ``"P"`` → ``"✓  ="``
+    - ``"T"`` → ``"✗  ="``
+    - ``"M"`` → ``"✗  <"``
+    - ``"D"`` → ``"✗  >"``
+    """
+    try:
+        return _STATE_GLYPHS[state]
+    except KeyError:
+        raise ValueError(
+            f"state must be one of P, T, M, D; got {state!r}"
+        ) from None
+
 
 def combine_states(state_a: str, state_b: str, policy: str = "best") -> str:
     """
