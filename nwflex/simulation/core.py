@@ -464,6 +464,40 @@ def reverse_complement(seq: str) -> str:
     return seq.translate(_COMP_TABLE)[::-1]
 
 
+def mirror_reads(reads: List[Read]) -> List[Read]:
+    """
+    Reverse-complement a list of reads for the mirror frame.
+
+    Each returned read carries the reverse-complemented sequence with
+    ``lflank_extent`` and ``rflank_extent`` swapped (since left and
+    right flanks swap under rc).  ``var_start`` is carried through
+    unchanged.
+
+    Useful in per-haplotype sweeps where the mirror reference and zone
+    were already built once at setup via :func:`build_mirror_frame` —
+    each new haplotype only needs its reads flipped.
+
+    Parameters
+    ----------
+    reads : list of Read
+        Forward reads.
+
+    Returns
+    -------
+    list of Read
+        Mirror-frame reads.
+    """
+    return [
+        Read(
+            sequence=reverse_complement(r.sequence),
+            var_start=r.var_start,
+            lflank_extent=r.rflank_extent,
+            rflank_extent=r.lflank_extent,
+        )
+        for r in reads
+    ]
+
+
 def build_mirror_frame(
     reference: str,
     reads: List[Read],
@@ -531,15 +565,7 @@ def build_mirror_frame(
     z_start, z_end = zone
     n = len(reference)
     rc_reference = reverse_complement(reference)
-    rc_reads = [
-        Read(
-            sequence=reverse_complement(r.sequence),
-            var_start=r.var_start,
-            lflank_extent=r.rflank_extent,
-            rflank_extent=r.lflank_extent,
-        )
-        for r in reads
-    ]
+    rc_reads = mirror_reads(reads)
     rc_zone = (n - z_end, n - z_start)
 
     if extra_reference is None:
@@ -1259,136 +1285,3 @@ def combine_states(state_a: str, state_b: str, policy: str = "best") -> str:
     return state_a if a_pri >= b_pri else state_b
 
 
-class BwaBothStrandsState(NamedTuple):
-    """Combined plus per-strand BWA alignment state classifications."""
-    state: str        #: combined state under the ``combine`` policy
-    fwd_state: str    #: forward-strand state ("P", "T", "M", or "D")
-    rc_state: str     #: reverse-complement-strand state
-
-    @property
-    def strands_disagree(self) -> bool:
-        return self.fwd_state != self.rc_state
-
-
-def bwa_state_both_strands(
-    both: "BwaBothStrandsResult",
-    z_start: int,
-    z_end: int,
-    truth_z_bp: int,
-    ref_length: int,
-    truth_nw_score: float,
-    read_seq: str,
-    ref_seq: str,
-    *,
-    score_matrix: Any,
-    gap_open: float,
-    gap_extend: float,
-    alphabet_to_index: Any,
-    min_flank: int = 1,
-    combine: str = "best",
-) -> BwaBothStrandsState:
-    """
-    Classify a both-strands BWA alignment against the truth.
-
-    Scores both strands (rc flipped to forward coords) under the same
-    NW affine-gap formula as the truth and classifies each via
-    :func:`alignment_state`.  Returns the combined state plus the
-    individual fwd and rc states so the caller can render or
-    aggregate either view.
-
-    Combination policy (state priority ``P > T > M > D``):
-
-    - ``"best"`` (default) — the *better* of the two strands.  Gives
-      BWA every benefit of the doubt about tie-break direction (one
-      strand getting it right is enough).
-    - ``"worst"`` — the *worse* of the two strands.  Treats BWA as only
-      as good as its weakest direction; a cell is Pass only when both
-      strands pass.
-    """
-    if combine not in ("best", "worst"):
-        raise ValueError(f"combine must be 'best' or 'worst', got {combine!r}")
-    fwd_score = score_alignment(
-        read_seq, ref_seq, both.fwd.pos, both.fwd.cigar,
-        score_matrix=score_matrix, gap_open=gap_open,
-        gap_extend=gap_extend, alphabet_to_index=alphabet_to_index,
-    )
-    fwd_state = alignment_state(
-        both.fwd.cigar, both.fwd.pos, fwd_score, truth_nw_score,
-        z_start, z_end, truth_z_bp, convention="bwa", min_flank=min_flank,
-    )
-    rc_pos, rc_cigar = rc_to_forward_alignment(
-        both.rc.pos, both.rc.cigar, ref_length,
-    )
-    rc_score = score_alignment(
-        read_seq, ref_seq, rc_pos, rc_cigar,
-        score_matrix=score_matrix, gap_open=gap_open,
-        gap_extend=gap_extend, alphabet_to_index=alphabet_to_index,
-    )
-    rc_state = alignment_state(
-        rc_cigar, rc_pos, rc_score, truth_nw_score,
-        z_start, z_end, truth_z_bp, convention="bwa", min_flank=min_flank,
-    )
-    if combine == "best":
-        chosen = (
-            fwd_state
-            if _STATE_PRIORITY[fwd_state] <= _STATE_PRIORITY[rc_state]
-            else rc_state
-        )
-    else:  # "worst"
-        chosen = (
-            fwd_state
-            if _STATE_PRIORITY[fwd_state] >= _STATE_PRIORITY[rc_state]
-            else rc_state
-        )
-    return BwaBothStrandsState(
-        state=chosen, fwd_state=fwd_state, rc_state=rc_state,
-    )
-
-
-def bwa_verdict_both_strands(
-    both: BwaBothStrandsResult,
-    z_start: int,
-    z_end: int,
-    truth_z_bp: int,
-    ref_length: int,
-    *,
-    min_flank: int = 1,
-) -> bool:
-    """
-    Per-read verdict for a both-strands BWA-MEM alignment.
-
-    Returns ``True`` iff *either* the forward-strand or the reverse-
-    complement-strand hit recovers the truth on the given repeat zone.
-    The rc strand is flipped to forward coordinates via
-    :func:`rc_to_forward_alignment` before the check, so both strands
-    are scored against the same ``(z_start, z_end)`` interval.
-
-    Smith-Waterman tie-breaking depends on DP cell evaluation order,
-    so the two strands can return different (equally optimal)
-    alignments; OR-ing their verdicts removes that artifact.
-
-    Parameters
-    ----------
-    both : BwaBothStrandsResult
-        Output of :func:`align_bwa_both_strands` for one read.
-    z_start, z_end : int
-        Half-open repeat interval in the forward reference (0-based).
-    truth_z_bp : int
-        Ground-truth read bp inside the repeat interval.
-    ref_length : int
-        Length of the reference (used to flip rc → forward).
-    min_flank : int, default 1
-        Minimum reference bp consumed in each flank.
-    """
-    fwd_ok = is_arm_correct(
-        both.fwd.cigar, both.fwd.pos, z_start, z_end, truth_z_bp,
-        convention="bwa", min_flank=min_flank,
-    )
-    rc_pos, rc_cigar = rc_to_forward_alignment(
-        both.rc.pos, both.rc.cigar, ref_length,
-    )
-    rc_ok = is_arm_correct(
-        rc_cigar, rc_pos, z_start, z_end, truth_z_bp,
-        convention="bwa", min_flank=min_flank,
-    )
-    return bool(fwd_ok or rc_ok)

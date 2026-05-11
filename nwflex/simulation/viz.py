@@ -5,8 +5,6 @@ viz.py — visualizations for the simulation harness.
   alignment around a repeat-zone interval.
 - :func:`project_alignment_to_ref` projects a CIGAR onto reference
   coordinates as a per-position read-base string.
-- :func:`plot_alignment_pileup` renders one or more such projections
-  as a stacked, color-coded pileup on a single axis.
 - :func:`plot_correctness_heatmap` produces the three-panel
   (Δ × lflank) correct/wrong heatmap used by the validation cells.
 """
@@ -18,9 +16,9 @@ from typing import Iterable, List, Mapping, Sequence, Tuple
 from .core import parse_cigar, reverse_complement
 
 
-# Internal sentinels used inside ``project_alignment_to_ref`` so the
-# resulting string round-trips cleanly into integer codes for the
-# pileup plotter without colliding with any biological alphabet char.
+# Internal sentinels for ``project_alignment_to_ref`` so the resulting
+# string can round-trip into integer codes without colliding with any
+# biological alphabet character.
 _BG_SENTINEL = "\x01"
 _GAP_SENTINEL = "\x02"
 
@@ -97,132 +95,6 @@ def project_alignment_to_ref(
             raise ValueError(f"unsupported CIGAR op: {op!r}")
     return "".join(row)
 
-
-def plot_alignment_pileup(
-    ax,
-    ref: str,
-    rows: Sequence[Mapping],
-    *,
-    zone: Tuple[int, int] | None = None,
-    alphabet_to_index: Mapping[str, int] | None = None,
-    nt_colors: Mapping[str, str] | None = None,
-    bg_color: str = "whitesmoke",
-    gap_color: str = "#888888",
-    show_legend: bool = True,
-    row_gap_after: Iterable[int] = (),
-    fontsize: int = 10,
-):
-    """
-    Render a multi-lane pileup of alignments on a single matplotlib axis.
-
-    Each entry in ``rows`` is a mapping carrying the keys ``label``,
-    ``read_seq``, ``pos``, ``cigar``.  Each lane is the CIGAR projected
-    onto ``ref`` coordinates via :func:`project_alignment_to_ref`,
-    colored per-base via ``imshow``.
-
-    Parameters
-    ----------
-    ax : matplotlib Axes
-        The axis to draw into.
-    ref : str
-        Forward reference sequence the alignments are against.
-    rows : sequence of mapping
-        One mapping per lane.  Required keys: ``label`` (str),
-        ``read_seq`` (str), ``pos`` (1-based int), ``cigar`` (str).
-    zone : (int, int), optional
-        Half-open repeat interval.  When given, vertical dashed lines
-        mark the zone edges.
-    alphabet_to_index : mapping, optional
-        Nucleotide → integer code.  Defaults to ``A=0, C=1, G=2, T=3``.
-    nt_colors : mapping, optional
-        Nucleotide → color.  Defaults to the palette used in
-        Notebook 6's STR pileup.
-    bg_color, gap_color : str
-        Colors for outside-span and deleted-reference cells.
-    show_legend : bool
-        Draw a per-nucleotide legend at upper right.
-    row_gap_after : iterable of int
-        Row indices (in the original ``rows`` order) after which to
-        insert a blank visual separator row.
-    fontsize : int
-        Tick / legend font size.
-
-    Returns
-    -------
-    matplotlib.image.AxesImage
-        The ``imshow`` artist.
-    """
-    import numpy as np
-    from matplotlib.colors import ListedColormap
-    from matplotlib.patches import Patch
-
-    rows = list(rows)
-    if alphabet_to_index is None:
-        alphabet_to_index = {"A": 0, "C": 1, "G": 2, "T": 3}
-    if nt_colors is None:
-        nt_colors = {
-            "A": "#80BCA3",
-            "C": "#BDDEF7",
-            "G": "#E6AC27",
-            "T": "#BF4D28",
-        }
-
-    ref_len = len(ref)
-    sorted_nts = sorted(alphabet_to_index.keys(),
-                        key=lambda k: alphabet_to_index[k])
-    gap_set = set(row_gap_after)
-
-    # Code map: 0 = gap, 1 = background, 2.. = nucleotides (sorted order).
-    nt_code = {nt: 2 + i for i, nt in enumerate(sorted_nts)}
-
-    code_rows: List[List[int]] = []
-    labels: List[str] = []
-    for i, r in enumerate(rows):
-        projected = project_alignment_to_ref(
-            ref_len, r["pos"], r["cigar"], r["read_seq"],
-            gap_char=_GAP_SENTINEL, bg_char=_BG_SENTINEL,
-        )
-        codes = []
-        for ch in projected:
-            if ch == _GAP_SENTINEL:
-                codes.append(0)
-            elif ch == _BG_SENTINEL:
-                codes.append(1)
-            else:
-                codes.append(nt_code.get(ch, 1))
-        code_rows.append(codes)
-        labels.append(r["label"])
-        if i in gap_set:
-            code_rows.append([1] * ref_len)
-            labels.append("")
-
-    base_array = np.array(code_rows, dtype=int)
-    colors = [gap_color, bg_color] + [nt_colors[nt] for nt in sorted_nts]
-    cmap = ListedColormap(colors)
-    im = ax.imshow(
-        base_array, aspect="auto", cmap=cmap, interpolation="nearest",
-        vmin=0, vmax=len(colors) - 1,
-    )
-
-    ax.set_yticks(range(len(labels)))
-    ax.set_yticklabels(labels, fontfamily="monospace", fontsize=fontsize)
-    ax.set_xlabel("Reference position", fontsize=fontsize)
-
-    if zone is not None:
-        z0, z1 = zone
-        ax.axvline(z0 - 0.5, color="red", linestyle="--", linewidth=1)
-        ax.axvline(z1 - 0.5, color="blue", linestyle="--", linewidth=1)
-
-    if show_legend:
-        handles = [Patch(facecolor=nt_colors[nt], edgecolor="black", label=nt)
-                   for nt in sorted_nts]
-        handles.append(Patch(facecolor=gap_color, edgecolor="black",
-                             label="gap"))
-        handles.append(Patch(facecolor=bg_color, edgecolor="black",
-                             label="off-span"))
-        ax.legend(handles=handles, loc="upper right", fontsize=fontsize)
-
-    return im
 
 
 def render_zoom(
@@ -416,6 +288,9 @@ def plot_layout_schematic(
     snv: Mapping | None = None,
     read_lflank_example: float | None = None,
     read_rflank_example: float | None = None,
+    delta_range: Tuple[int, int] | None = None,
+    snv_offset_range: Tuple[int, int] | None = None,
+    lflank_range: Tuple[int, int] | None = None,
     fontsize: int = 14,
     figsize: tuple = (13.0, 4.8),
     suptitle: str | None = None,
@@ -485,6 +360,12 @@ def plot_layout_schematic(
         schematic_dict["read_lflank_example"] = float(read_lflank_example)
     if read_rflank_example is not None:
         schematic_dict["read_rflank_example"] = float(read_rflank_example)
+    if delta_range is not None:
+        schematic_dict["delta_range"] = tuple(int(v) for v in delta_range)
+    if snv_offset_range is not None:
+        schematic_dict["snv_offset_range"] = tuple(int(v) for v in snv_offset_range)
+    if lflank_range is not None:
+        schematic_dict["lflank_range"] = tuple(int(v) for v in lflank_range)
 
     _draw_schematic(ax, schematic=schematic_dict, fontsize=fontsize)
 
@@ -713,8 +594,14 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
             xytext=(delta_x_b, y_hap + bar_h + 0.10),
             arrowprops=dict(arrowstyle="<->", color=missing_edge, lw=1.4),
         )
+        delta_range = schematic.get("delta_range")
+        if delta_range is not None:
+            lo, hi = delta_range
+            delta_label = f"$\\Delta \\in [{lo:+d}, {hi:+d}]$ motif copies"
+        else:
+            delta_label = f"$\\Delta = {delta_ex:+d}$ motif copies"
         ax.text((delta_x_a + delta_x_b) / 2, y_hap + bar_h + 0.30,
-                f"$\\Delta = {delta_ex:+d}$ motif copies",
+                delta_label,
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
 
@@ -757,7 +644,13 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
                 [bracket_y - tick_h / 2, bracket_y + tick_h / 2],
                 color=snv_color, lw=1.2, zorder=4)
         bracket_center = (snv_bar_right + flank_w) / 2
-        ax.text(bracket_center, bracket_y + 0.12, f"SNV: {off} bp",
+        snv_off_range = schematic.get("snv_offset_range")
+        if snv_off_range is not None:
+            lo, hi = snv_off_range
+            snv_label = f"SNV: $\\in [{lo}, {hi}]$ bp"
+        else:
+            snv_label = f"SNV: {off} bp"
+        ax.text(bracket_center, bracket_y + 0.12, snv_label,
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=snv_color, fontweight="bold")
 
@@ -798,8 +691,14 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
         xytext=(flank_w, arrow_y),
         arrowprops=dict(arrowstyle="<->", color=read_outline, lw=1.4),
     )
+    lflank_rng = schematic.get("lflank_range")
+    if lflank_rng is not None:
+        lo, hi = lflank_rng
+        lflank_label = f"lflank extent $\\in [{lo}, {hi}]$"
+    else:
+        lflank_label = "lflank extent"
     ax.text(flank_w - top_lflank / 2, text_y,
-            "lflank extent",
+            lflank_label,
             ha="center", va="bottom",
             fontsize=fontsize - 1, color=read_outline, fontweight="bold")
 
@@ -815,6 +714,86 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
+
+
+def _draw_state_panel(ax, sub_df, *, deltas, lflanks, color_of, fontsize):
+    """Draw one (delta × lflank) panel into ``ax``.
+
+    Renders a fwd Rectangle + rc Circle per cell, sets ticks/grid, and
+    highlights the Δ=0 column.  Does not set the panel title or axis
+    labels — the caller owns those.
+
+    ``sub_df`` is the long-form subset for this panel.  It must carry
+    either ``fwd_state`` + ``rc_state``, or a single ``state`` column
+    (in which case both shapes share that state).
+    """
+    import numpy as np
+    from matplotlib.patches import Circle, Rectangle
+
+    has_per_strand = "fwd_state" in sub_df.columns and "rc_state" in sub_df.columns
+    if has_per_strand:
+        fwd_grid = sub_df.pivot(index="lflank", columns="delta", values="fwd_state")
+        rc_grid  = sub_df.pivot(index="lflank", columns="delta", values="rc_state")
+    else:
+        single = sub_df.pivot(index="lflank", columns="delta", values="state")
+        fwd_grid = rc_grid = single
+    fwd_grid = fwd_grid.reindex(index=lflanks, columns=deltas)
+    rc_grid  = rc_grid.reindex(index=lflanks, columns=deltas)
+
+    for li, L in enumerate(lflanks):
+        for di, D in enumerate(deltas):
+            ax.add_patch(Rectangle(
+                (D - 0.5, L - 0.5), 1, 1,
+                facecolor=color_of(fwd_grid.iat[li, di]),
+                edgecolor="none", linewidth=0,
+            ))
+            ax.add_patch(Circle(
+                (D, L), 0.26,
+                facecolor=color_of(rc_grid.iat[li, di]),
+                edgecolor="#222222", linewidth=0.6,
+                zorder=4,
+            ))
+
+    ax.set_xlim(deltas[0] - 0.5, deltas[-1] + 0.5)
+    ax.set_ylim(lflanks[0] - 0.5, lflanks[-1] + 0.5)
+    ax.set_aspect("equal")
+    ax.set_xticks(deltas)
+    ax.set_yticks(lflanks)
+    ax.set_xticks(np.array(deltas, dtype=float) - 0.5, minor=True)
+    ax.set_yticks(np.array(lflanks, dtype=float) - 0.5, minor=True)
+    ax.grid(which="minor", color="#bbbbbb", linewidth=0.5)
+    ax.tick_params(which="major", labelsize=fontsize, colors="#222222")
+    ax.tick_params(which="minor", length=0)
+    if 0 in deltas:
+        ax.add_patch(Rectangle(
+            (-0.5, lflanks[0] - 0.5),
+            1, lflanks[-1] - lflanks[0] + 1,
+            fill=False, edgecolor="black", linewidth=1.5, zorder=5,
+        ))
+
+
+_STATE_COLOR_DEFAULTS = dict(
+    color_recovered="#08519c",    # dark blue   — P
+    color_co_optimal="#6baed6",   # light blue  — T
+    color_dominant="#ffffff",     # white       — M
+    color_dominated="#c0392b",    # red         — D
+    color_nan="#cccccc",          # grey        — missing/NaN
+)
+
+
+def _state_color_fn(*, color_recovered, color_co_optimal,
+                    color_dominant, color_dominated, color_nan):
+    table = {
+        "P": color_recovered,
+        "T": color_co_optimal,
+        "M": color_dominant,
+        "D": color_dominated,
+    }
+    def color_of(state):
+        if isinstance(state, str) and state in table:
+            return table[state]
+        return color_nan
+    return color_of
 
 
 def plot_correctness_heatmap(
@@ -876,9 +855,8 @@ def plot_correctness_heatmap(
     -------
     matplotlib.figure.Figure
     """
-    import numpy as np
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Circle, Patch, Rectangle
+    from matplotlib.patches import Patch
 
     deltas = list(deltas)
     lflanks = list(lflanks)
@@ -888,19 +866,11 @@ def plot_correctness_heatmap(
     label_size = fontsize + 1
     title_size = fontsize + 3
 
-    state_to_color = {
-        "P": color_recovered,
-        "T": color_co_optimal,
-        "M": color_dominant,
-        "D": color_dominated,
-    }
-
-    def color_of(state):
-        if isinstance(state, str) and state in state_to_color:
-            return state_to_color[state]
-        return color_nan
-
-    has_per_strand = "fwd_state" in df.columns and "rc_state" in df.columns
+    color_of = _state_color_fn(
+        color_recovered=color_recovered, color_co_optimal=color_co_optimal,
+        color_dominant=color_dominant, color_dominated=color_dominated,
+        color_nan=color_nan,
+    )
 
     fig, axes = plt.subplots(
         1, n, figsize=(5.0 * n + 2.5, 6.0), sharey=True,
@@ -912,49 +882,11 @@ def plot_correctness_heatmap(
         axes = [axes]
 
     for ax, arm in zip(axes, arms):
-        sub = df[df["arm"] == arm]
-        if has_per_strand:
-            fwd_grid = sub.pivot(index="lflank", columns="delta", values="fwd_state")
-            rc_grid  = sub.pivot(index="lflank", columns="delta", values="rc_state")
-        else:
-            single = sub.pivot(index="lflank", columns="delta", values="state")
-            fwd_grid = rc_grid = single
-        fwd_grid = fwd_grid.reindex(index=lflanks, columns=deltas)
-        rc_grid  = rc_grid.reindex(index=lflanks, columns=deltas)
-
-        for li, L in enumerate(lflanks):
-            for di, D in enumerate(deltas):
-                fwd_c = color_of(fwd_grid.iat[li, di])
-                rc_c  = color_of(rc_grid.iat[li, di])
-                # Box (always) = forward strand verdict.
-                ax.add_patch(Rectangle(
-                    (D - 0.5, L - 0.5), 1, 1,
-                    facecolor=fwd_c, edgecolor="none", linewidth=0,
-                ))
-                # Circle (always) = reverse-complement strand verdict.
-                ax.add_patch(Circle(
-                    (D, L), 0.26,
-                    facecolor=rc_c, edgecolor="#222222", linewidth=0.6,
-                    zorder=4,
-                ))
-
-        ax.set_xlim(deltas[0] - 0.5, deltas[-1] + 0.5)
-        ax.set_ylim(lflanks[0] - 0.5, lflanks[-1] + 0.5)
-        ax.set_aspect("equal")
-        ax.set_xticks(deltas)
-        ax.set_yticks(lflanks)
-        ax.set_xticks(np.array(deltas, dtype=float) - 0.5, minor=True)
-        ax.set_yticks(np.array(lflanks, dtype=float) - 0.5, minor=True)
-        ax.grid(which="minor", color="#bbbbbb", linewidth=0.5)
-        ax.tick_params(which="major", labelsize=fontsize, colors="#222222")
-        ax.tick_params(which="minor", length=0)
-        # Highlight the Δ=0 column (haplotype == reference) when present.
-        if 0 in deltas:
-            ax.add_patch(Rectangle(
-                (-0.5, lflanks[0] - 0.5),
-                1, lflanks[-1] - lflanks[0] + 1,
-                fill=False, edgecolor="black", linewidth=1.5, zorder=5,
-            ))
+        _draw_state_panel(
+            ax, df[df["arm"] == arm],
+            deltas=deltas, lflanks=lflanks,
+            color_of=color_of, fontsize=fontsize,
+        )
         ax.set_xlabel("Δ (Hap N $-$ Ref N)", fontsize=label_size, color="#222222")
         ax.set_title(arm_titles[arm], fontsize=title_size, color="#222222")
     axes[0].set_ylabel("lflank extent", fontsize=label_size, color="#222222")
@@ -1018,5 +950,151 @@ def plot_correctness_heatmap(
         # Center on the panel area (not the whole figure, which includes legend).
         cx = (axes[0].get_position().x0 + axes[-1].get_position().x1) / 2
         fig.text(cx, sub_y, subtitle, ha="center", va="top",
+                 fontsize=label_size, style="italic", color="#444444")
+    return fig
+
+
+def plot_correctness_heatmap_rows(
+    rows,
+    *,
+    deltas: Iterable[int],
+    lflanks: Iterable[int],
+    arm_titles: Mapping[str, str],
+    row_label_fn,
+    color_recovered: str = "#08519c",
+    color_co_optimal: str = "#6baed6",
+    color_dominant: str = "#ffffff",
+    color_dominated: str = "#c0392b",
+    color_nan: str = "#cccccc",
+    fontsize: int = 14,
+    scale: float = 1.0,
+    suptitle: str | None = None,
+    subtitle: str | None = None,
+):
+    """
+    Multi-row four-state heatmap.  Each row is one ``(key, df_subset)``
+    pair; columns are the methods in ``arm_titles``.  Useful for sweeping
+    an outer parameter (e.g. SNV position) while keeping each row's
+    inner (Δ × lflank) panels comparable.
+
+    Mirrors :func:`plot_correctness_heatmap` per panel (fwd Rectangle,
+    rc Circle, Δ=0 column highlighted) and shares the same legend.
+
+    Parameters
+    ----------
+    rows : list of (key, pandas.DataFrame)
+        Each entry contributes one row of three panels.  The DataFrame
+        must carry ``delta``, ``lflank``, ``arm`` and either
+        ``fwd_state`` + ``rc_state`` or a single ``state``.
+    deltas, lflanks, arm_titles
+        Same as :func:`plot_correctness_heatmap`.
+    row_label_fn : callable
+        Maps the row's ``key`` to the string displayed as the row's
+        y-axis label (e.g., ``lambda k: f"offset = {k} bp"``).
+    suptitle, subtitle, fontsize, color_*
+        Same as :func:`plot_correctness_heatmap`.
+
+    Returns
+    -------
+    matplotlib.figure.Figure
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.patches import Patch
+
+    deltas = list(deltas)
+    lflanks = list(lflanks)
+    arms = list(arm_titles.keys())
+    rows = list(rows)
+    n_rows = len(rows)
+    n_cols = len(arms)
+
+    label_size = fontsize + 1
+    title_size = fontsize + 3
+
+    color_of = _state_color_fn(
+        color_recovered=color_recovered, color_co_optimal=color_co_optimal,
+        color_dominant=color_dominant, color_dominated=color_dominated,
+        color_nan=color_nan,
+    )
+
+    figsize = (
+        scale * (5.0 * n_cols + 0.8),
+        scale * (5.0 * n_rows + 1.6),
+    )
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=figsize,
+        sharex=True, sharey=True,
+        gridspec_kw={"wspace": 0.02, "hspace": 0.18},
+        subplot_kw={"facecolor": "white"},
+        squeeze=False,
+    )
+    fig.patch.set_facecolor("white")
+
+    for r, (key, df) in enumerate(rows):
+        for c, arm in enumerate(arms):
+            ax = axes[r, c]
+            _draw_state_panel(
+                ax, df[df["arm"] == arm],
+                deltas=deltas, lflanks=lflanks,
+                color_of=color_of, fontsize=fontsize,
+            )
+            if r == 0:
+                ax.set_title(arm_titles[arm], fontsize=title_size,
+                             color="#222222")
+            if r == n_rows - 1:
+                ax.set_xlabel("Δ (Hap N $-$ Ref N)",
+                              fontsize=label_size, color="#222222")
+        axes[r, 0].set_ylabel(
+            f"{row_label_fn(key)}\nlflank extent",
+            fontsize=label_size, color="#222222",
+        )
+
+    shape_color = "#999999"
+    legend_handles = [
+        Patch(facecolor=color_recovered,  edgecolor="#bbbbbb"),
+        Patch(facecolor=color_co_optimal, edgecolor="#bbbbbb"),
+        Patch(facecolor=color_dominant,   edgecolor="#bbbbbb"),
+        Patch(facecolor=color_dominated,  edgecolor="#bbbbbb"),
+        Patch(facecolor=shape_color, edgecolor="#222222", linewidth=0.6),
+        _CircleHandle(color=shape_color),
+    ]
+    legend_labels = [
+        "✓ align, score = truth",
+        "✗ align, score = truth",
+        "✗ align, score < truth",
+        "✗ align, score > truth",
+        "forward",
+        "reverse",
+    ]
+
+    # Panels fill the width; legend sits below the title block, anchored
+    # to the figure's left margin.  Two rows × ncol=3 (column-major):
+    # col1 = score=truth (P,T), col2 = score≠truth (M,D),
+    # col3 = strand shapes (fwd, rc).
+    panel_top = 0.84 if suptitle else 0.88
+    fig.subplots_adjust(left=0.07, right=0.98, top=panel_top, bottom=0.05)
+
+    fig.legend(
+        handles=legend_handles,
+        labels=legend_labels,
+        handler_map={_CircleHandle: _make_circle_handler()},
+        ncol=3,
+        loc="lower left",
+        bbox_to_anchor=(0.07, panel_top + 0.04),
+        frameon=True,
+        fontsize=fontsize,
+        handlelength=1.9, handleheight=1.9,
+        handletextpad=0.6, columnspacing=1.9,
+        labelspacing=0.8, borderpad=0.7,
+        facecolor="white", edgecolor="#444444", labelcolor="#222222",
+    )
+
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.985,
+                     fontweight="bold", color="#222222")
+    if subtitle is not None:
+        sub_y = 0.96 if suptitle else 0.985
+        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig

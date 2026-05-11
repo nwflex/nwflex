@@ -25,7 +25,13 @@ from nwflex.simulation import (
     decode_z_bp,
     flank_bases_consumed,
     is_arm_correct,
+    mirror_reads,
     parse_cigar,
+    pivot_for_heatmap,
+    plot_correctness_heatmap,
+    plot_correctness_heatmap_rows,
+    sweep,
+    SweepVariant,
     project_alignment_to_ref,
     rc_cigar_to_forward,
     rc_to_forward_alignment,
@@ -298,6 +304,45 @@ class TestTileReads:
 # ---------------------------------------------------------------------------
 # reverse_complement
 # ---------------------------------------------------------------------------
+
+class TestMirrorReads:
+    """mirror_reads — rc-flip a list of reads without touching the reference."""
+
+    @staticmethod
+    def _read(seq, var_start, lf, rf):
+        return Read(sequence=seq, var_start=var_start,
+                    lflank_extent=lf, rflank_extent=rf)
+
+    def test_empty_list_returns_empty_list(self):
+        assert mirror_reads([]) == []
+
+    def test_sequence_is_reverse_complemented(self):
+        r = self._read("ACGTACG", var_start=0, lf=2, rf=3)
+        (out,) = mirror_reads([r])
+        assert out.sequence == reverse_complement("ACGTACG")
+
+    def test_extents_are_swapped_and_var_start_preserved(self):
+        r = self._read("ACGT", var_start=12, lf=3, rf=5)
+        (out,) = mirror_reads([r])
+        assert out.lflank_extent == 5  # was rf
+        assert out.rflank_extent == 3  # was lf
+        assert out.var_start == 12
+
+    def test_round_trip_is_identity(self):
+        r = self._read("ACGTACG", var_start=7, lf=2, rf=4)
+        (back,) = mirror_reads(mirror_reads([r]))
+        assert back == r
+
+    def test_matches_build_mirror_frame_reads(self):
+        # mirror_reads must produce the same rc_reads as build_mirror_frame,
+        # which is the contract that lets sweep cells reuse it per-haplotype.
+        r1 = self._read("ACGTACGT", var_start=3, lf=2, rf=4)
+        r2 = self._read("TTTGCCAA", var_start=9, lf=1, rf=7)
+        _, rc_reads_full, _ = build_mirror_frame(
+            "AAAACCCCGGGGTTTT", reads=[r1, r2], zone=(4, 12),
+        )
+        assert mirror_reads([r1, r2]) == rc_reads_full
+
 
 class TestBuildMirrorFrame:
     """build_mirror_frame — mirror one or two references in one call."""
@@ -1027,3 +1072,241 @@ class TestRcToForwardAlignment:
         fwd_pos, fwd_cigar = rc_to_forward_alignment(3, "5M2D5M", 20)
         assert fwd_pos == 7
         assert fwd_cigar == "5M2D5M"
+
+
+# ---------------------------------------------------------------------------
+# sweep / pivot_for_heatmap
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+import pandas as pd
+
+
+class _MockHap:
+    """Minimal duck-type stand-in for Haplotype with just body_len."""
+    def __init__(self, body_len):
+        self.body_len = body_len
+
+
+def _mock_read(lflank_extent, tag):
+    """Read-shaped namespace with a tag attribute so methods can echo it."""
+    return SimpleNamespace(
+        sequence="A" * 10, var_start=0,
+        lflank_extent=lflank_extent, rflank_extent=10,
+        tag=tag,
+    )
+
+
+def _make_mock_method(name, fwd_state, rc_state, *, recorder=None):
+    """Build a SimpleNamespace method that records its inputs and emits
+    canned states.  ``recorder`` is an optional list to append events to."""
+    def run(reads, orient):
+        if recorder is not None:
+            recorder.append((name, "run", orient, len(reads),
+                             tuple(r.tag for r in reads)))
+        # Return one hit per read; hit is the read itself for traceability.
+        return list(reads)
+
+    def truth(r, hap):
+        return 100.0
+
+    def classify(hit, r, truth_score, truth_z_bp, orient):
+        return fwd_state if orient == "fwd" else rc_state
+
+    return SimpleNamespace(name=name, run=run, truth=truth, classify=classify)
+
+
+class TestSweep:
+    """sweep() — flatten reads, batched run per (method, orient), per-cell classify."""
+
+    def test_returns_long_form_one_row_per_orient(self):
+        v = SweepVariant(
+            label={"delta": 0}, hap=_MockHap(body_len=15),
+            reads=[_mock_read(1, "a"), _mock_read(2, "b")],
+        )
+        methods = [_make_mock_method("X", "P", "T")]
+        df = sweep([v], methods)
+        # 2 reads × 1 method × 2 orients = 4 rows
+        assert len(df) == 4
+        assert set(df.columns) == {"delta", "lflank", "method", "orient", "state"}
+        assert sorted(df["orient"].unique()) == ["fwd", "rc"]
+
+    def test_label_columns_propagate(self):
+        v1 = SweepVariant(label={"delta": -1, "tag": "x"},
+                          hap=_MockHap(10), reads=[_mock_read(1, "a")])
+        v2 = SweepVariant(label={"delta":  2, "tag": "y"},
+                          hap=_MockHap(20), reads=[_mock_read(3, "b")])
+        df = sweep([v1, v2], [_make_mock_method("M", "P", "P")])
+        # Each row should carry its variant's label fields.
+        v1_rows = df[df["delta"] == -1]
+        v2_rows = df[df["delta"] ==  2]
+        assert (v1_rows["tag"] == "x").all()
+        assert (v2_rows["tag"] == "y").all()
+
+    def test_lflank_comes_from_read(self):
+        v = SweepVariant(
+            label={}, hap=_MockHap(10),
+            reads=[_mock_read(3, "a"), _mock_read(7, "b")],
+        )
+        df = sweep([v], [_make_mock_method("M", "P", "P")])
+        # Each read appears in both orients, so each lflank appears twice.
+        assert sorted(df["lflank"].tolist()) == [3, 3, 7, 7]
+
+    def test_state_comes_from_classify(self):
+        v = SweepVariant(label={"delta": 0}, hap=_MockHap(10),
+                         reads=[_mock_read(1, "a")])
+        m = _make_mock_method("M", fwd_state="T", rc_state="D")
+        df = sweep([v], [m])
+        assert df.set_index("orient")["state"].to_dict() == {"fwd": "T", "rc": "D"}
+
+    def test_run_is_batched_once_per_method_orient(self):
+        # Two variants, each contributing 2 reads — sweep must call
+        # run() exactly twice per method (once for fwd, once for rc),
+        # over all 4 reads at once.
+        v1 = SweepVariant(label={"delta": 0}, hap=_MockHap(10),
+                          reads=[_mock_read(1, "a"), _mock_read(2, "b")])
+        v2 = SweepVariant(label={"delta": 1}, hap=_MockHap(10),
+                          reads=[_mock_read(3, "c"), _mock_read(4, "d")])
+        events = []
+        methods = [
+            _make_mock_method("X", "P", "P", recorder=events),
+            _make_mock_method("Y", "P", "P", recorder=events),
+        ]
+        sweep([v1, v2], methods)
+        # 2 methods × 2 orients = 4 run() calls, each over all 4 reads.
+        runs = [e for e in events if e[1] == "run"]
+        assert len(runs) == 4
+        for (name, _kind, orient, n_reads, tags) in runs:
+            assert n_reads == 4
+            assert tags == ("a", "b", "c", "d")
+        # And every (method, orient) pair was hit exactly once.
+        assert {(name, orient) for (name, _k, orient, *_rest) in runs} == {
+            ("X", "fwd"), ("X", "rc"), ("Y", "fwd"), ("Y", "rc"),
+        }
+
+    def test_empty_variants_returns_empty_df(self):
+        df = sweep([], [_make_mock_method("M", "P", "P")])
+        assert isinstance(df, pd.DataFrame)
+        assert len(df) == 0
+
+
+class TestPivotForHeatmap:
+    """pivot_for_heatmap() — long-form -> arm-wide for the heatmap helper."""
+
+    def _long(self, rows):
+        return pd.DataFrame(rows)
+
+    def test_pivots_orient_into_columns(self):
+        long = self._long([
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "fwd", "state": "P"},
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "rc",  "state": "P"},
+        ])
+        wide = pivot_for_heatmap(long)
+        assert set(wide.columns) >= {"delta", "lflank", "arm",
+                                     "fwd_state", "rc_state", "state"}
+        row = wide.iloc[0]
+        assert row["fwd_state"] == "P"
+        assert row["rc_state"]  == "P"
+
+    def test_renames_method_to_arm(self):
+        long = self._long([
+            {"delta": 0, "lflank": 1, "method": "BWA-std", "orient": "fwd", "state": "P"},
+            {"delta": 0, "lflank": 1, "method": "BWA-std", "orient": "rc",  "state": "P"},
+        ])
+        wide = pivot_for_heatmap(long)
+        assert "method" not in wide.columns
+        assert wide["arm"].tolist() == ["BWA-std"]
+
+    def test_combined_state_best_policy(self):
+        # combine_states("T", "D", "best") = "T" (T has lower priority number).
+        long = self._long([
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "fwd", "state": "T"},
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "rc",  "state": "D"},
+        ])
+        wide = pivot_for_heatmap(long, combine="best")
+        assert wide["state"].tolist() == ["T"]
+
+    def test_combined_state_worst_policy(self):
+        long = self._long([
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "fwd", "state": "T"},
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "rc",  "state": "D"},
+        ])
+        wide = pivot_for_heatmap(long, combine="worst")
+        assert wide["state"].tolist() == ["D"]
+
+    def test_one_row_per_arm_per_cell(self):
+        long = self._long([
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "fwd", "state": "P"},
+            {"delta": 0, "lflank": 1, "method": "X", "orient": "rc",  "state": "P"},
+            {"delta": 0, "lflank": 1, "method": "Y", "orient": "fwd", "state": "D"},
+            {"delta": 0, "lflank": 1, "method": "Y", "orient": "rc",  "state": "D"},
+            {"delta": 1, "lflank": 1, "method": "X", "orient": "fwd", "state": "T"},
+            {"delta": 1, "lflank": 1, "method": "X", "orient": "rc",  "state": "T"},
+            {"delta": 1, "lflank": 1, "method": "Y", "orient": "fwd", "state": "M"},
+            {"delta": 1, "lflank": 1, "method": "Y", "orient": "rc",  "state": "M"},
+        ])
+        wide = pivot_for_heatmap(long)
+        # 2 deltas × 1 lflank × 2 arms = 4 rows
+        assert len(wide) == 4
+        assert sorted(wide["arm"].unique().tolist()) == ["X", "Y"]
+
+
+class TestPlotCorrectnessHeatmapRows:
+    """plot_correctness_heatmap_rows — multi-row stacked heatmap grid."""
+
+    @staticmethod
+    def _df(deltas, lflanks, arms):
+        return pd.DataFrame([
+            {"delta": d, "lflank": L, "arm": a,
+             "fwd_state": "P", "rc_state": "T", "state": "P"}
+            for d in deltas for L in lflanks for a in arms
+        ])
+
+    def test_axis_count_equals_rows_times_arms(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        deltas, lflanks = [-1, 0, 1], [1, 2]
+        arms = {"X": "X-arm", "Y": "Y-arm", "Z": "Z-arm"}
+        df = self._df(deltas, lflanks, arms)
+        rows = [(k, df) for k in (10, 20, 30, 40)]
+        fig = plot_correctness_heatmap_rows(
+            rows, deltas=deltas, lflanks=lflanks, arm_titles=arms,
+            row_label_fn=lambda k: f"k={k}",
+        )
+        # 4 rows × 3 arms = 12 panels.  Legend doesn't add an Axes
+        # (it's a fig.legend, not an inset axes).
+        assert len(fig.axes) == 4 * 3
+
+    def test_column_titles_only_on_top_row(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        deltas, lflanks = [-1, 0, 1], [1, 2]
+        arms = {"X": "X-arm", "Y": "Y-arm"}
+        df = self._df(deltas, lflanks, arms)
+        rows = [(k, df) for k in (1, 2)]
+        fig = plot_correctness_heatmap_rows(
+            rows, deltas=deltas, lflanks=lflanks, arm_titles=arms,
+            row_label_fn=lambda k: f"k={k}",
+        )
+        # axes ordering from plt.subplots(n_rows, n_cols) is row-major.
+        top_row = fig.axes[:2]
+        bottom_row = fig.axes[2:4]
+        assert [ax.get_title() for ax in top_row] == ["X-arm", "Y-arm"]
+        assert [ax.get_title() for ax in bottom_row] == ["", ""]
+
+    def test_row_labels_use_row_label_fn(self):
+        import matplotlib
+        matplotlib.use("Agg")
+        deltas, lflanks = [-1, 0, 1], [1, 2]
+        arms = {"X": "X-arm"}
+        df = self._df(deltas, lflanks, arms)
+        rows = [("alpha", df), ("beta", df)]
+        fig = plot_correctness_heatmap_rows(
+            rows, deltas=deltas, lflanks=lflanks, arm_titles=arms,
+            row_label_fn=lambda k: f"row {k}",
+        )
+        # First column of each row carries the row label.
+        first_col_ylabels = [fig.axes[0].get_ylabel(), fig.axes[1].get_ylabel()]
+        assert first_col_ylabels[0].startswith("row alpha")
+        assert first_col_ylabels[1].startswith("row beta")

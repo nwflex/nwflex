@@ -32,6 +32,7 @@ from .core import (
     align_bwa,
     align_bwa_both_strands,
     reverse_complement,
+    mirror_reads,
     build_mirror_frame,
     # NW-flex harness
     NwflexResult,
@@ -43,12 +44,9 @@ from .core import (
     is_arm_correct,
     rc_to_forward_alignment,
     rc_cigar_to_forward,
-    bwa_verdict_both_strands,
     alignment_state,
     state_to_glyph,
     combine_states,
-    bwa_state_both_strands,
-    BwaBothStrandsState,
     score_alignment,
     bwa_truth_cigar,
     nwflex_truth_cigar,
@@ -59,9 +57,15 @@ from .core import (
 from .viz import (
     render_zoom,
     plot_correctness_heatmap,
+    plot_correctness_heatmap_rows,
     plot_layout_schematic,
     project_alignment_to_ref,
-    plot_alignment_pileup,
+)
+
+from .sweep import (
+    SweepVariant,
+    sweep,
+    pivot_for_heatmap,
 )
 
 
@@ -80,6 +84,7 @@ __all__ = [
     "align_bwa",
     "align_bwa_both_strands",
     "reverse_complement",
+    "mirror_reads",
     "build_mirror_frame",
     "NwflexResult",
     "align_nwflex",
@@ -90,19 +95,20 @@ __all__ = [
     "is_arm_correct",
     "rc_to_forward_alignment",
     "rc_cigar_to_forward",
-    "bwa_verdict_both_strands",
     "alignment_state",
     "state_to_glyph",
     "combine_states",
-    "bwa_state_both_strands",
-    "BwaBothStrandsState",
     "score_alignment",
     "bwa_truth_cigar",
     "nwflex_truth_cigar",
     # Viz
     "render_zoom",
     "plot_correctness_heatmap",
+    "plot_correctness_heatmap_rows",
     "plot_layout_schematic",
     "project_alignment_to_ref",
-    "plot_alignment_pileup",
+    # Sweep harness
+    "SweepVariant",
+    "sweep",
+    "pivot_for_heatmap",
 ]
