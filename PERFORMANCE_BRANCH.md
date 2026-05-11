@@ -1,9 +1,9 @@
 # Performance comparison: NW-flex vs BWA-MEM
 
 This branch adds a performance comparison between NW-flex and BWA-MEM
-to the NW-flex repository. The comparison is delivered as a guided
-walkthrough notebook that simulates reads from real human STR loci,
-aligns them with both methods under matched conditions, and reports
+to the NW-flex repository. The comparison is delivered as two guided
+walkthrough notebooks that simulate reads from real human STR loci,
+align them with both methods under matched conditions, and report
 where the methods agree and where they diverge.
 
 We are combining the messy versions from parallel repos into a clean
@@ -29,7 +29,7 @@ reverse-complement strand misses it (or vice versa). Running both
 orientations recovers more reads, but the **principled test** is
 whether the truth alignment is itself co-optimal in the score
 landscape — that question generalizes uniformly across BWA fwd, BWA
-rc, and NW-flex.
+rc, NW-flex fwd, and NW-flex rc.
 
 **NW-flex is uniformly correct on length-only sweeps.** With a single
 SNV adjacent to the repeat boundary, NW-flex still passes most cells.
@@ -39,16 +39,21 @@ at extreme contractions flips to *outscored* — the EP pattern's
 per-base-skip flexibility lets the aligner construct a wrong
 alignment that strictly outscores the truth.
 
-Compound repeats (val3, still in progress) sharpen the result: BWA-MEM
-fails by a gradient that depends on motif similarity, intervening
-sequence, and length. NW-flex is correct by construction — when the
-only difference between haplotype and reference is the repeat counts,
-the algorithm is guaranteed to find the optimum over the allowed
-counts.
+**Compound repeats** sharpen the result. The reference is built from
+two adjacent motifs joined by a bridge of length $|M|$, and the
+haplotype varies both counts independently. BWA-MEM fails by a
+gradient that depends on motif similarity, bridge length, and
+absolute counts. NW-flex is correct by construction — when the only
+difference between haplotype and reference is the repeat counts, the
+algorithm is guaranteed to find the optimum over the allowed counts.
+
+The single-repeat story (length sweep and single SNV) lives in
+Notebook 7. The compound-repeat story, which needs its own simulation
+setup with the new $|M|$ bridge parameter, lives in Notebook 8.
 
 ## Two scoring conventions
 
-Throughout the notebook we are careful to distinguish two scores:
+Throughout the notebooks we are careful to distinguish two scores:
 
 - **SW (Smith-Waterman / local-extension) score** — what BWA-MEM
   emits in its `AS:i:` tag. This is the maximum cumulative score
@@ -70,26 +75,42 @@ This is a documented BWA-MEM choice (`mem_chain2aln` keeps the local
 extension's `max` even after switching to the global path); we
 sidestep it by always rescoring under NW.
 
-## The four-state verdict
+## Verdict
 
-Each (read, arm) cell is classified into one of four states:
+We evaluate each (read, arm) cell along two independent axes:
 
-- **Pass (P)** — the aligner's chosen CIGAR recovers the truth.
-- **Tied (T)** — chosen wrong, but its NW score equals the truth's NW
-  score. The aligner *could* have picked truth; tie-break landed
-  elsewhere. We treat tied as a co-optimal "fair" success.
-- **Missed (M)** — chosen wrong, truth strictly outscores the chosen
-  NW score. The aligner heuristically missed: truth was reachable
-  but the aligner left score on the table. Structurally impossible
-  for NW-flex (its DP is exhaustive).
-- **Outscored (D)** — chosen wrong, chosen NW score strictly outscores
-  truth. The score landscape genuinely prefers a wrong alignment.
+1. **Length correctness** — does the chosen CIGAR recover the truth
+   alignment's repeat length? The alignment must span the repeat
+   (at least one reference base consumed on each side of the repeat
+   interval) and its decoded repeat length must equal the truth's.
+2. **Score relationship** — how does the chosen alignment's NW score
+   compare to the truth alignment's NW score: $>$, $=$, or $<$?
 
-For BWA arms (which run forward and reverse-complement strands),
-each strand is classified independently and the cell carries both
-states. The summary state combines them under a `combine` policy
-(`"best"` gives BWA every benefit of the doubt, `"worst"` makes the
-weakest strand dominate). NW-flex is single-arm.
+A length-correct alignment necessarily matches the truth's score; the
+score axis only carries information when the alignment is wrong on
+length. Crossed against the correctness axis, the score relationship
+distinguishes three failure modes:
+
+- *score $<$ truth* — heuristic miss: the truth was reachable but
+  the aligner left score on the table. Structurally impossible for
+  NW-flex (its DP is exhaustive).
+- *score $=$ truth* — co-optimal: the aligner could have picked
+  truth; deterministic tie-break landed elsewhere. We treat this as
+  a fair success.
+- *score $>$ truth* — the score landscape itself prefers a wrong
+  alignment.
+
+We compute both axes per strand. Each read has a forward arm and a
+reverse-complement arm, and **both BWA-MEM and NW-flex** get the
+same treatment: BWA-MEM is run on the read and its reverse
+complement; NW-flex is run on the original (read, reference) and on
+the mirror frame (reverse-complement of both). The mirror frame is
+built once during simulation setup so that all four configurations
+(BWA fwd, BWA rc, NW-flex fwd, NW-flex rc) consume strand-equivalent
+inputs. Per-strand verdicts can be combined with a `combine` policy
+(`"best"` gives the arm every benefit of the doubt; `"worst"` makes
+the weakest strand dominate); the heatmap also shows them split
+diagonally so the strand asymmetry stays visible.
 
 ## Input panel of repeat loci
 
@@ -99,22 +120,22 @@ reference genome (hg38). The panel TSV has one row per locus, columns:
     pind, chr, start_38, stop_38, strand, type,
     lflank, rflank, ms_seq, ref_score_per_base
 
-Panel lives at `data/hg38_motif_sample_K100.tsv`.
+Panel lives at `data/hg38_motif_sample_K100.tsv`. A separate appendix
+notebook (`notebooks/Appendix_TRF.ipynb`) documents the TRF run and
+panel construction.
 
-A separate appendix notebook documenting the TRF run and panel
-construction is deferred — there is code and instructions but it's
-not strictly needed for the comparison.
+## New Validation Notebooks
 
-## New Validation Notebook
+The work splits across two notebooks. Notebook 7 builds the single-repeat
+machinery and runs the length and SNV comparisons. Notebook 8 reuses
+the verdict and scoring conventions but rebuilds the simulation around
+a compound-repeat reference.
 
-The notebook is a guided walkthrough. We build the simulation
-machinery once, set up the alignment under three configurations, and
-then run the comparison three times, each time changing one thing
-about the simulation.
+### Notebook 7 — single repeat (length and SNV)
 
-### Simulation setup
+#### Simulation setup
 
-We construct the simulation in three stages.
+We construct the simulation in four stages.
 
 The **locus** comes from the panel: a real flank pair, a real repeat
 motif, and a chosen reference repeat count $N$. Together these give
@@ -133,7 +154,14 @@ constrained to cover at least $K$ bases of each flank. Within that
 constraint the read start determines how much left flank the read
 covers — its *lflank extent*.
 
-### Three alignment configurations
+The **mirror frame** is a single derived object — locus and reads
+both reverse-complemented — that supports running every aligner on
+both orientations under matched conditions. Building it once at
+setup means the alignment configurations downstream see strand
+fairness as a property of the inputs, not a side step inside each
+aligner.
+
+#### Three alignment configurations
 
 Each read is aligned against the locus reference under three
 configurations:
@@ -145,84 +173,92 @@ configurations:
    an extended reference of $3N$ repeat copies so the EP pattern can
    match haplotype counts both below and above $N$.
 
-For BWA-MEM we align both orientations and classify each strand
-independently. Smith-Waterman tie-breaking depends on DP cell
-evaluation order, so the two strands can return different (equally
-optimal) alignments; running both orientations removes the
-order-of-evaluation artifact and surfaces direction-dependent
-heuristic misses.
+A closer-look section walks the chosen CIGARs on three illustrative
+reads (a centered read and the two boundary reads), and an SW-vs-NW
+score explainer documents the gap between BWA's reported SW score
+and the recomputed NW score on boundary cells.
 
-### Verdict and visualization
-
-A read's verdict for each arm is the four-state classification above
-(P / T / M / D). The heatmap renders each cell as two triangles split
-along the anti-diagonal:
-
-- lower-left triangle = forward strand
-- upper-right triangle = reverse-complement strand
-
-Cells where the strands agree render uniformly; cells where they
-disagree show two colors split diagonally. Single-arm aligners
-(NW-flex) render with both triangles the same color, looking like
-ordinary heatmap squares. The Δ=0 column (haplotype = reference) is
-outlined in black on every panel.
-
-### First comparison — length variation only
+#### First comparison — length variation only
 
 We run the simulation with the haplotype flanks unchanged and the
 repeat count varying over $N + \Delta$ for a small range of $\Delta$.
 
-NW-flex is uniformly **Pass**. BWA-MEM at standard parameters is
-mostly **Outscored** except for a thin Δ≈0 stripe — soft-clipping
-wins under standard affine-gap. The no-clip arm shows a stair-step:
-many Pass cells, but for negative-Δ reads at small lflank, BWA's
-heuristic in one direction *Misses* the truth alignment even though
-truth has a strictly higher NW score (the other direction often
-finds it). The triangle visualization makes the strand asymmetry
-direct.
+NW-flex is uniformly **length-correct**. BWA-MEM at standard
+parameters is mostly *outscored* except for a thin $\Delta \approx 0$
+stripe — soft-clipping wins under standard affine-gap. The no-clip
+arm shows a stair-step: many length-correct cells, but for negative-$\Delta$
+reads at small lflank, BWA's heuristic in one direction is a *miss*
+even though truth has a strictly higher NW score (the other
+direction often finds it). The triangle visualization makes the
+strand asymmetry direct.
 
-### Second comparison — a single SNV in the flank
+#### Second comparison — a single SNV in the flank
 
 We repeat the first comparison with one change: the haplotype carries
 a single SNV in the left flank, two bases inside the boundary
 (landing just outside the body but inside the read's flank context).
 Locus, read tiling, and alignment configurations unchanged.
 
-The heatmap now reads differently. NW-flex remains Pass where it has
-solid flank overhang. A band of cells at lflank ∈ {2, 3, 4} flips
-to **Tied** — the truth's NW score equals the chosen alignment's
-score; the aligner's tie-break landed differently. At Δ=-5
-(0-motif haplotype) three cells flip to **Outscored**: the EP
-pattern's per-base-skip flexibility lets the aligner construct a
-wrong alignment that strictly outscores the truth.
+NW-flex remains length-correct where it has solid flank overhang. A
+band of cells at lflank ∈ {2, 3, 4} flips to *tied* — the truth's
+NW score equals the chosen alignment's score; the aligner's
+tie-break landed differently. At $\Delta=-5$ (0-motif haplotype)
+three cells flip to *outscored*: the EP pattern's per-base-skip
+flexibility lets the aligner construct a wrong alignment that
+strictly outscores the truth.
 
 A diagnostic cell at the bottom of this section walks every NW-flex
-non-pass cell, displays the chosen vs truth CIGARs side by side, and
-confirms the Tied/Outscored split.
+non-length-correct cell, displays the chosen vs truth CIGARs side by
+side, and confirms the tied/outscored split.
 
-### Third comparison — compound repeat (in progress)
+### Notebook 8 — compound repeat
 
-The third comparison changes the locus structure. The reference is
-built from two adjacent repeat motifs joined by a short interrupting
-sequence,
-$X = A \cdot R_1^{N_1} \cdot M \cdot R_2^{N_2} \cdot B$, and the
-haplotype varies both counts independently. The reads, the alignment
-methods, and the verdict carry over.
+Compound-repeat alignment introduces a new structural parameter and
+needs its own simulation setup.
 
-The EP pattern for two repeat blocks enumerates the product of
-allowed counts in a single pass, so NW-flex is correct everywhere on
-the $(\Delta_1, \Delta_2)$ grid by construction. BWA-MEM is correct
+#### Compound-locus simulation
+
+The reference is built from two adjacent repeat motifs joined by a
+bridge of length $|M|$:
+$X = A \cdot R_1^{N_1} \cdot M \cdot R_2^{N_2} \cdot B$. The flanks
+$A$ and $B$ come from the panel as in Notebook 7. The bridge $M$ is
+a fixed-length sequence drawn from real adjacent context so the
+boundary between each repeat block and the bridge is clean. The
+haplotype varies both counts independently:
+$X' = A \cdot R_1^{N_1 + \Delta_1} \cdot M \cdot R_2^{N_2 + \Delta_2} \cdot B$.
+
+Reads are tiled across the haplotype as in Notebook 7. The mirror
+frame is built the same way.
+
+#### Three alignment configurations on compound
+
+The two BWA configurations carry over without change — BWA does not
+need to know about the compound structure. NW-flex uses a
+multi-block EP pattern built by `build_EP_multi_STR_phase`, which
+enumerates the product of allowed counts in a single pass against a
+$3N$-style extended compound reference.
+
+#### Third comparison — the $(\Delta_1, \Delta_2)$ sweep
+
+We sweep both deltas over a grid and produce a heatmap per arm. The
+EP pattern for two repeat blocks is exhaustive over the grid, so
+NW-flex is correct everywhere by construction. BWA-MEM is correct
 on part of the grid; the size and shape of the failure region
-depends on motif similarity, the length of the interrupting
-sequence, and the absolute counts.
+depends on motif similarity and the absolute counts.
+
+#### Bridge-length effect
+
+We sweep $|M|$ over a small range and stack the resulting per-arm
+heatmaps so the dependence of BWA's failure region on bridge length
+is visible side by side. NW-flex remains correct by construction.
 
 ## Not included
 
 - No changes to the NW-flex core algorithm.
 - No full benchmarking harness or command-line sweep tooling. The
-  notebook generates a representative slice inline; larger-scale
+  notebooks generate representative slices inline; larger-scale
   results are deferred.
-- No external service or large-data dependency. The notebook runs on
+- No external service or large-data dependency. The notebooks run on
   the committed panel TSV plus `bwa` and `samtools` on `PATH`; if
   those are missing, the BWA cells skip cleanly with an installation
   hint.
@@ -230,28 +266,41 @@ sequence, and the absolute counts.
 ## Plan
 
 The work on this branch falls into a few areas. We move between them
-as the notebook drives demand — the goal is for intermediate states
+as the notebooks drive demand — the goal is for intermediate states
 to run, not for any one area to be finished first.
 
-**Notebook**
-- [x] Instantiate outline
-- [x] Compose introduction with explanation and purpose
-- [x] Setup cell, imports, scoring carry-through
+**Notebook 7 — single repeat**
+- [x] Outline, introduction, setup
 - [x] Simulation setup — locus, haplotype, reads
-- [x] Three alignment configurations (BWA-MEM std/no-clip + NW-flex,
-      with closer-look render_zoom views, the SW-vs-NW score
-      explainer, the correctness rule, and the
-      inequivalence-of-orientations demo motivating both-strands BWA)
-- [x] First comparison — length variation (four-state verdict,
-      two-triangle heatmap)
-- [x] Second comparison — SNV in flank (with the tie-test diagnostic
-      that connects back to the inequivalence demo)
-- [ ] Third comparison — compound repeat
+- [ ] Simulation setup — mirror frame (built; **in progress** moving it
+      out of the alignment-configurations section into setup)
+- [x] Three alignment configurations (BWA std/no-clip + NW-flex, with
+      closer-look and SW-vs-NW score explainer)
+- [ ] Verdict section — two-axis (length, score) framing with the
+      inequivalence-of-orientations material; currently still mixed
+      into the alignment-configurations section as the correctness
+      rule + score-columns + inequivalence subsections
+- [x] First comparison — length variation
+- [x] Second comparison — SNV in flank (with the NW-flex tie/outscored
+      diagnostic)
+- [ ] Summary
+
+**Notebook 8 — compound repeat**
+- [x] Outline, setup, scoring carry-through
+- [x] Compound-locus simulation (with $|M|$ bridge parameter)
+- [x] Compound haplotype and reads
+- [x] Three alignment configurations on compound (multi-block EP)
+- [x] Correctness rule and truth-alignment helpers for compound
+- [x] $(\Delta_1, \Delta_2)$ sweep with per-arm heatmaps
+- [x] Bridge-length effect grid
+- [ ] Verdict section aligned to the two-axis framing once Notebook 7
+      lands it
+- [ ] Mirror frame for NW-flex symmetric treatment
 - [ ] Summary
 
 **Package code** (lives in `nwflex/simulation/`, split into `core.py`
 and `viz.py`)
-- [x] Load default parameters for different score schema
+- [x] Default parameters for the score schemas in use
 - [x] Panel loading and locus construction
 - [x] Haplotype and read tiling
 - [x] BWA-MEM wrappers — `align_bwa` (single-strand) and
@@ -259,30 +308,28 @@ and `viz.py`)
 - [x] CIGAR utilities — `parse_cigar`, `decode_z_bp`,
       `flank_bases_consumed`, `is_arm_correct`,
       `rc_to_forward_alignment`
-- [x] Scoring helpers — `score_alignment` (NW score of any CIGAR);
-      `bwa_truth_cigar`, `nwflex_truth_cigar` (natural truth-alignment
-      builders for the locus / 3N references)
-- [x] Verdict helpers — `alignment_state` (P/T/M/D classification);
-      `bwa_state_both_strands` (per-strand + combined classification,
-      with `combine={"best","worst"}`); `bwa_verdict_both_strands`
-      (legacy boolean form, kept for backwards compatibility)
-- [x] Visualization — `render_zoom` (per-alignment ASCII zoom);
-      `plot_correctness_heatmap` (three-panel four-state two-triangle
-      heatmap with shared legend showing forward / reverse split)
-- [x] NW-flex setup stays inline in the notebook (3N STRLocus + EP
-      pattern + RefAligner; no wrapper, by design)
-- [ ] Compound-repeat helpers
+- [x] Scoring helpers — `score_alignment`; `bwa_truth_cigar`,
+      `nwflex_truth_cigar`
+- [x] Verdict helpers — `alignment_state`,
+      `bwa_state_both_strands`, `bwa_verdict_both_strands`
+- [x] Visualization — `render_zoom`, `plot_correctness_heatmap`
+- [x] Mirror frame — `build_mirror_frame`
+- [x] Compound-repeat helpers (`CompoundLocus`, multi-block EP,
+      `is_arm_correct_multi`, compound truth-CIGAR builder)
+- [ ] NW-flex mirror wrapper that mirrors NW-flex's strand handling
+      under matched conditions (currently inline in notebook)
 
 **Data and tests**
 - [x] Panel TSV in `data/`
-- [x] Tests covering the new modules — 81 in `tests/test_simulation.py`
-      (203 across the repo)
+- [x] TRF parsing, annotation, and filtering utilities
+- [x] Tests covering the simulation modules — see `tests/test_simulation.py`
 
 **Repo plumbing**
-- [ ] Add the notebook to `notebooks/build_pdf.sh`
+- [ ] Add Notebook 7 and Notebook 8 to `notebooks/build_pdf.sh`
 - [ ] Note the `bwa` and `samtools` runtime requirements in the install
       docs
 
 **Later**
-- [ ] Appendix notebook documenting TRF and panel construction
+- [x] Appendix notebook documenting TRF and panel construction
+      (`Appendix_TRF.ipynb` exists; polish deferred)
 - [ ] Scripts for data generation at scale

@@ -3,15 +3,226 @@ viz.py — visualizations for the simulation harness.
 
 - :func:`render_zoom` produces a column-aligned ASCII view of one
   alignment around a repeat-zone interval.
+- :func:`project_alignment_to_ref` projects a CIGAR onto reference
+  coordinates as a per-position read-base string.
+- :func:`plot_alignment_pileup` renders one or more such projections
+  as a stacked, color-coded pileup on a single axis.
 - :func:`plot_correctness_heatmap` produces the three-panel
   (Δ × lflank) correct/wrong heatmap used by the validation cells.
 """
 
 from __future__ import annotations
 
-from typing import Iterable, Mapping
+from typing import Iterable, List, Mapping, Sequence, Tuple
 
 from .core import parse_cigar, reverse_complement
+
+
+# Internal sentinels used inside ``project_alignment_to_ref`` so the
+# resulting string round-trips cleanly into integer codes for the
+# pileup plotter without colliding with any biological alphabet char.
+_BG_SENTINEL = "\x01"
+_GAP_SENTINEL = "\x02"
+
+
+def project_alignment_to_ref(
+    ref_len: int,
+    pos_1based: int,
+    cigar: str,
+    read_seq: str,
+    *,
+    gap_char: str = "-",
+    bg_char: str = " ",
+) -> str:
+    """
+    Project an alignment onto reference coordinates.
+
+    Walks ``cigar`` from ``pos_1based`` (1-based, as in SAM ``POS``) and
+    writes the read base placed at each reference position.  The output
+    is a string of length ``ref_len``:
+
+    - ``M``/``=``/``X`` — the consumed read base at that ref position.
+    - ``D``/``N`` — ``gap_char`` (ref position covered, no read base).
+    - outside the alignment span, or covered by soft-clipped (``S``) or
+      hard-clipped (``H``) ops — ``bg_char``.
+
+    Insertion (``I``) and soft/hard clip ops consume read bases (or
+    nothing) but no reference position, so they do not appear in the
+    projected row.  This is the same projection convention as
+    :func:`nwflex.aligners.get_aligned_bases`, just driven by
+    (CIGAR, position) rather than expanded alignment strings, so
+    pileups can mix BWA-MEM and NW-flex alignments uniformly.
+
+    Parameters
+    ----------
+    ref_len : int
+        Length of the forward reference the alignment is against.
+    pos_1based : int
+        1-based reference position of the first aligned read base.
+    cigar : str
+        CIGAR string for the alignment.
+    read_seq : str
+        Read DNA sequence (forward orientation relative to ``cigar``).
+    gap_char, bg_char : str
+        Single-character substitutes for deleted positions and
+        outside-span positions, respectively.
+
+    Returns
+    -------
+    str
+        Length-``ref_len`` projection.
+    """
+    row = [bg_char] * ref_len
+    ref_pos = pos_1based - 1
+    read_pos = 0
+    for length, op in parse_cigar(cigar):
+        if op in ("M", "=", "X"):
+            for _ in range(length):
+                if 0 <= ref_pos < ref_len:
+                    row[ref_pos] = read_seq[read_pos]
+                ref_pos += 1
+                read_pos += 1
+        elif op in ("D", "N"):
+            for _ in range(length):
+                if 0 <= ref_pos < ref_len:
+                    row[ref_pos] = gap_char
+                ref_pos += 1
+        elif op == "I":
+            read_pos += length
+        elif op == "S":
+            read_pos += length
+        elif op == "H":
+            pass
+        else:
+            raise ValueError(f"unsupported CIGAR op: {op!r}")
+    return "".join(row)
+
+
+def plot_alignment_pileup(
+    ax,
+    ref: str,
+    rows: Sequence[Mapping],
+    *,
+    zone: Tuple[int, int] | None = None,
+    alphabet_to_index: Mapping[str, int] | None = None,
+    nt_colors: Mapping[str, str] | None = None,
+    bg_color: str = "whitesmoke",
+    gap_color: str = "#888888",
+    show_legend: bool = True,
+    row_gap_after: Iterable[int] = (),
+    fontsize: int = 10,
+):
+    """
+    Render a multi-lane pileup of alignments on a single matplotlib axis.
+
+    Each entry in ``rows`` is a mapping carrying the keys ``label``,
+    ``read_seq``, ``pos``, ``cigar``.  Each lane is the CIGAR projected
+    onto ``ref`` coordinates via :func:`project_alignment_to_ref`,
+    colored per-base via ``imshow``.
+
+    Parameters
+    ----------
+    ax : matplotlib Axes
+        The axis to draw into.
+    ref : str
+        Forward reference sequence the alignments are against.
+    rows : sequence of mapping
+        One mapping per lane.  Required keys: ``label`` (str),
+        ``read_seq`` (str), ``pos`` (1-based int), ``cigar`` (str).
+    zone : (int, int), optional
+        Half-open repeat interval.  When given, vertical dashed lines
+        mark the zone edges.
+    alphabet_to_index : mapping, optional
+        Nucleotide → integer code.  Defaults to ``A=0, C=1, G=2, T=3``.
+    nt_colors : mapping, optional
+        Nucleotide → color.  Defaults to the palette used in
+        Notebook 6's STR pileup.
+    bg_color, gap_color : str
+        Colors for outside-span and deleted-reference cells.
+    show_legend : bool
+        Draw a per-nucleotide legend at upper right.
+    row_gap_after : iterable of int
+        Row indices (in the original ``rows`` order) after which to
+        insert a blank visual separator row.
+    fontsize : int
+        Tick / legend font size.
+
+    Returns
+    -------
+    matplotlib.image.AxesImage
+        The ``imshow`` artist.
+    """
+    import numpy as np
+    from matplotlib.colors import ListedColormap
+    from matplotlib.patches import Patch
+
+    rows = list(rows)
+    if alphabet_to_index is None:
+        alphabet_to_index = {"A": 0, "C": 1, "G": 2, "T": 3}
+    if nt_colors is None:
+        nt_colors = {
+            "A": "#80BCA3",
+            "C": "#BDDEF7",
+            "G": "#E6AC27",
+            "T": "#BF4D28",
+        }
+
+    ref_len = len(ref)
+    sorted_nts = sorted(alphabet_to_index.keys(),
+                        key=lambda k: alphabet_to_index[k])
+    gap_set = set(row_gap_after)
+
+    # Code map: 0 = gap, 1 = background, 2.. = nucleotides (sorted order).
+    nt_code = {nt: 2 + i for i, nt in enumerate(sorted_nts)}
+
+    code_rows: List[List[int]] = []
+    labels: List[str] = []
+    for i, r in enumerate(rows):
+        projected = project_alignment_to_ref(
+            ref_len, r["pos"], r["cigar"], r["read_seq"],
+            gap_char=_GAP_SENTINEL, bg_char=_BG_SENTINEL,
+        )
+        codes = []
+        for ch in projected:
+            if ch == _GAP_SENTINEL:
+                codes.append(0)
+            elif ch == _BG_SENTINEL:
+                codes.append(1)
+            else:
+                codes.append(nt_code.get(ch, 1))
+        code_rows.append(codes)
+        labels.append(r["label"])
+        if i in gap_set:
+            code_rows.append([1] * ref_len)
+            labels.append("")
+
+    base_array = np.array(code_rows, dtype=int)
+    colors = [gap_color, bg_color] + [nt_colors[nt] for nt in sorted_nts]
+    cmap = ListedColormap(colors)
+    im = ax.imshow(
+        base_array, aspect="auto", cmap=cmap, interpolation="nearest",
+        vmin=0, vmax=len(colors) - 1,
+    )
+
+    ax.set_yticks(range(len(labels)))
+    ax.set_yticklabels(labels, fontfamily="monospace", fontsize=fontsize)
+    ax.set_xlabel("Reference position", fontsize=fontsize)
+
+    if zone is not None:
+        z0, z1 = zone
+        ax.axvline(z0 - 0.5, color="red", linestyle="--", linewidth=1)
+        ax.axvline(z1 - 0.5, color="blue", linestyle="--", linewidth=1)
+
+    if show_legend:
+        handles = [Patch(facecolor=nt_colors[nt], edgecolor="black", label=nt)
+                   for nt in sorted_nts]
+        handles.append(Patch(facecolor=gap_color, edgecolor="black",
+                             label="gap"))
+        handles.append(Patch(facecolor=bg_color, edgecolor="black",
+                             label="off-span"))
+        ax.legend(handles=handles, loc="upper right", fontsize=fontsize)
+
+    return im
 
 
 def render_zoom(
@@ -208,16 +419,23 @@ def plot_layout_schematic(
     fontsize: int = 14,
     figsize: tuple = (13.0, 4.8),
     suptitle: str | None = None,
+    suptitle_loc: str = "center",
     subtitle: str | None = None,
     mirror: bool = False,
     flanks_aligned: bool = True,
+    show_nwflex: bool = False,
+    nwflex_factor: int = 3,
     ax=None,
 ):
     """
     Standalone explainer figure for the simulation geometry: a
     Reference row on top, a Haplotype row carrying ``Δ`` extra motif
     copies (or missing copies when ``delta_example < 0``), and a Read
-    row whose left overhang illustrates ``lflank extent``.
+    row whose left overhang illustrates ``lflank extent``.  When
+    ``show_nwflex`` is True an extra row sits above Reference showing
+    the NW-flex extended reference (``nwflex_factor * ref_n`` motif
+    copies); that row is always rendered flanks-aligned so the extra
+    copies do not blow out the figure width.
 
     Parameters
     ----------
@@ -258,6 +476,8 @@ def plot_layout_schematic(
         "delta_example": int(delta_example),
         "mirror": bool(mirror),
         "flanks_aligned": bool(flanks_aligned),
+        "show_nwflex": bool(show_nwflex),
+        "nwflex_factor": int(nwflex_factor),
     }
     if snv is not None:
         schematic_dict["snv"] = dict(snv)
@@ -292,11 +512,16 @@ def plot_layout_schematic(
         # subtitle as a small italic line just below it.  The caller
         # owns any figure-level suptitle.
         if suptitle is not None:
-            ax.set_title(suptitle, fontsize=title_size, fontweight="bold",
+            ax.set_title(suptitle, loc=suptitle_loc,
+                         fontsize=title_size, fontweight="bold",
                          color="#222222", pad=label_size + 6)
         if subtitle:
-            ax.text(0.5, 1.0, subtitle, transform=ax.transAxes,
-                    ha="center", va="bottom",
+            _loc_x = {"left": 0.0, "center": 0.5, "right": 1.0}.get(
+                suptitle_loc, 0.5)
+            _loc_ha = {"left": "left", "center": "center",
+                       "right": "right"}.get(suptitle_loc, "center")
+            ax.text(_loc_x, 1.0, subtitle, transform=ax.transAxes,
+                    ha=_loc_ha, va="bottom",
                     fontsize=label_size - 1, style="italic", color="#444444")
     return fig
 
@@ -366,11 +591,28 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
     read_ys = [y_read_bot + k * (bar_h + read_gap) for k in range(n_reads)]
 
     big_gap = 1.6
+    show_nwflex = bool(schematic.get("show_nwflex", False))
+    nwflex_factor = int(schematic.get("nwflex_factor", 3))
+    nwflex_n = nwflex_factor * ref_n
+    # NW-flex tiles always fit the same Z-zone width as the Reference,
+    # regardless of the global flanks_aligned setting — otherwise the
+    # 3N tiles would blow the figure width.
+    nwflex_tile_w = ref_repeat_w / nwflex_n if nwflex_n > 0 else tile_w
+
+    # Vertical stack (top to bottom): Reference, NW-flex ref (optional),
+    # Haplotype, Reads.  Compute from bottom up.
     y_hap = read_ys[-1] + bar_h + big_gap
-    y_ref = y_hap + bar_h + big_gap
+    if show_nwflex:
+        y_nwflex = y_hap + bar_h + big_gap
+        y_ref = y_nwflex + bar_h + big_gap
+    else:
+        y_nwflex = None
+        y_ref = y_hap + bar_h + big_gap
 
     flank_color  = "#e8e8e8"
     motif_color  = "#a6cee3"
+    nwflex_color = "#dceaf3"   # paler shade of motif_color; hints at "flexible"
+    nwflex_edge  = "#5a9bc0"   # dashed-edge color for NW-flex tiles
     extra_color  = "#fdd49e"
     missing_edge = "#c0392b"
     read_outline = "#08519c"
@@ -417,6 +659,28 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
     ax.text(flank_w + ref_repeat_w + flank_w / 2, label_y, "$B$",
             ha="center", va="bottom",
             fontsize=fontsize + 1, fontweight="bold", color="#7030a0")
+
+    # --- NW-flex extended-reference row (below Reference) ----------------
+    if show_nwflex:
+        _row_label(y_nwflex, "NW-flex ref")
+        _flank_box(0, y_nwflex, flank_w, "left flank")
+        # Tiles render in a paler shade with dashed edges, hinting at the
+        # EP-skip "extra edges": each tile boundary is a place the
+        # aligner can step across without paying a per-base penalty.
+        for i in range(nwflex_n):
+            ax.add_patch(Rectangle(
+                (flank_w + i * nwflex_tile_w, y_nwflex),
+                nwflex_tile_w, bar_h,
+                facecolor=nwflex_color, edgecolor=nwflex_edge,
+                linewidth=0.8, linestyle=(0, (2.5, 1.5)),
+            ))
+        _flank_box(flank_w + ref_repeat_w, y_nwflex, flank_w, "right flank")
+        # Italic Z' label above the row, matching the A/Z/B style on the
+        # Reference row but simpler (one centered annotation).
+        ax.text(flank_w + ref_repeat_w / 2, y_nwflex + bar_h + 0.20,
+                f"$Z' = (\\mathrm{{{display_motif}}})^{{{nwflex_n}}}$",
+                ha="center", va="bottom",
+                fontsize=fontsize, color="#c06020")
 
     # --- Haplotype row ---------------------------------------------------
     _row_label(y_hap, "Haplotype")

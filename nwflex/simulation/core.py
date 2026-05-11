@@ -468,7 +468,10 @@ def build_mirror_frame(
     reference: str,
     reads: List[Read],
     zone: Tuple[int, int],
-) -> Tuple[str, List[Read], Tuple[int, int]]:
+    *,
+    extra_reference: Optional[str] = None,
+    extra_zone: Optional[Tuple[int, int]] = None,
+) -> Tuple:
     """
     Build the mirror (reverse-complement) frame of a simulation.
 
@@ -482,6 +485,11 @@ def build_mirror_frame(
     Built into the simulation by design so every aligner can be
     evaluated on both orientations on equal footing.
 
+    When ``extra_reference`` and ``extra_zone`` are provided, that
+    second reference (e.g., NW-flex's extended ``A · R^{3N} · B``) and
+    its zone are mirrored alongside the primary one and appended to
+    the returned tuple.  The two extras must be provided together.
+
     Parameters
     ----------
     reference : str
@@ -491,19 +499,35 @@ def build_mirror_frame(
     zone : (int, int)
         Half-open repeat interval ``(z_start, z_end)`` in the forward
         reference (0-based).
+    extra_reference : str, optional
+        Second forward reference to mirror in the same call.
+    extra_zone : (int, int), optional
+        Half-open repeat interval in ``extra_reference``.
 
     Returns
     -------
-    rc_reference : str
-        ``reverse_complement(reference)``.
-    rc_reads : list of Read
-        Each read with its sequence reverse-complemented and its
-        ``lflank_extent`` / ``rflank_extent`` swapped.  ``var_start``
-        is carried through unchanged.
-    rc_zone : (int, int)
-        The repeat interval in rc-reference coordinates,
-        ``(len(reference) - z_end, len(reference) - z_start)``.
+    Without extras: ``(rc_reference, rc_reads, rc_zone)``.
+    With extras: ``(rc_reference, rc_reads, rc_zone, rc_extra_reference,
+    rc_extra_zone)``.
+
+    ``rc_reads`` carry reverse-complemented sequences with
+    ``lflank_extent`` / ``rflank_extent`` swapped; ``var_start`` is
+    carried through unchanged.  The mirror zone for a reference of
+    length ``n`` and forward zone ``(z_start, z_end)`` is
+    ``(n - z_end, n - z_start)``.
+
+    Raises
+    ------
+    ValueError
+        If exactly one of ``extra_reference`` and ``extra_zone`` is
+        provided.
     """
+    if (extra_reference is None) != (extra_zone is None):
+        raise ValueError(
+            "extra_reference and extra_zone must be provided together "
+            "(both or neither)"
+        )
+
     z_start, z_end = zone
     n = len(reference)
     rc_reference = reverse_complement(reference)
@@ -517,7 +541,16 @@ def build_mirror_frame(
         for r in reads
     ]
     rc_zone = (n - z_end, n - z_start)
-    return rc_reference, rc_reads, rc_zone
+
+    if extra_reference is None:
+        return rc_reference, rc_reads, rc_zone
+
+    n_extra = len(extra_reference)
+    rc_extra_reference = reverse_complement(extra_reference)
+    e_start, e_end = extra_zone
+    rc_extra_zone = (n_extra - e_end, n_extra - e_start)
+    return (rc_reference, rc_reads, rc_zone,
+            rc_extra_reference, rc_extra_zone)
 
 
 @dataclass(frozen=True)
@@ -588,6 +621,109 @@ def align_bwa_both_strands(
         BwaBothStrandsResult(fwd=f, rc=b)
         for f, b in zip(fwd_results, rc_results)
     ]
+
+
+# ---------------------------------------------------------------------------
+# NW-flex harness
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class NwflexResult:
+    """
+    One read's outcome from a single :func:`align_nwflex` run.
+
+    Attributes
+    ----------
+    pos : int
+        1-based reference position of the first aligned read base
+        (SAM ``POS`` convention).  NW-flex always returns an alignment,
+        so this is never ``None``.
+    cigar : str
+        CIGAR string for the alignment.
+    score : float
+        NW-flex's reported alignment score under the supplied scoring
+        scheme.  Matches ``score_alignment`` on the same CIGAR by
+        construction.
+    """
+    pos: int
+    cigar: str
+    score: float
+
+
+def align_nwflex(
+    reference: str,
+    reads: List[Read],
+    *,
+    extra_predecessors: Any,
+    score_matrix: Any,
+    gap_open: float,
+    gap_extend: float,
+    alphabet_to_index: Any,
+    max_read_length: Optional[int] = None,
+) -> List[NwflexResult]:
+    """
+    Run NW-flex against ``reference`` for every read.
+
+    Direction-agnostic by design: the harness takes a list of reads
+    and a reference and returns one alignment per read, in the same
+    order as ``reads``.  To evaluate both strands, call this twice —
+    once on the forward ``(reads, reference, zone)`` pair and once on
+    the mirror pair built by :func:`build_mirror_frame`.
+
+    Builds a single :class:`~nwflex.aligners.RefAligner` against
+    ``reference`` (so the cached DP buffers are reused across reads),
+    aligns each read, and returns one :class:`NwflexResult` per input.
+
+    Parameters
+    ----------
+    reference : str
+        Reference sequence the aligner runs against (often the
+        ``3N``-extended reference; the EP pattern must be built for
+        this reference's zone).
+    reads : list of Read
+        Reads to align.
+    extra_predecessors
+        EP pattern for the STR-aware extension, as produced by
+        ``nwflex.ep_patterns.build_EP_STR_phase`` for the matching
+        ``(reference, zone, motif length)``.
+    score_matrix, gap_open, gap_extend, alphabet_to_index
+        Scoring scheme, forwarded to ``RefAligner``.
+    max_read_length : int, optional
+        DP-buffer size hint.  Defaults to ``max(len(r.sequence) for r
+        in reads) + 5``.
+
+    Returns
+    -------
+    list of NwflexResult
+    """
+    from nwflex.aligners import RefAligner
+
+    if max_read_length is None:
+        max_read_length = (
+            max((len(r.sequence) for r in reads), default=0) + 5
+        )
+
+    aligner = RefAligner(
+        ref=reference,
+        extra_predecessors=extra_predecessors,
+        score_matrix=score_matrix,
+        gap_open=gap_open,
+        gap_extend=gap_extend,
+        alphabet_to_index=alphabet_to_index,
+        free_X=True,
+        free_Y=True,
+        max_read_length=max_read_length,
+    )
+
+    out: List[NwflexResult] = []
+    for r in reads:
+        a = aligner.align_simple(r.sequence)
+        out.append(NwflexResult(
+            pos=int(a["start_pos"]),
+            cigar=a["cigar"],
+            score=float(a["score"]),
+        ))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -830,6 +966,39 @@ def rc_to_forward_alignment(
     fwd_pos = ref_length - (rc_pos - 1) - ref_consumed + 1
     fwd_cigar = "".join(f"{length}{op}" for length, op in reversed(ops))
     return fwd_pos, fwd_cigar
+
+
+def rc_cigar_to_forward(
+    rc_pos: int,
+    rc_cigar: str,
+    ref_length: int,
+) -> str:
+    """
+    Return the forward-strand CIGAR equivalent to an rc-strand alignment.
+
+    Thin wrapper around :func:`rc_to_forward_alignment` that drops the
+    position component, intended for side-by-side display of forward
+    and mirror alignments in comparison tables (where only the CIGAR
+    shape is shown).
+
+    Parameters
+    ----------
+    rc_pos : int
+        1-based position in the rc reference where the rc-strand
+        alignment starts.
+    rc_cigar : str
+        CIGAR string for the rc-strand alignment.
+    ref_length : int
+        Length of the (forward, equivalently rc) reference.
+
+    Returns
+    -------
+    str
+        Forward-strand CIGAR — the same alignment, with op order
+        reversed.
+    """
+    _, fwd_cigar = rc_to_forward_alignment(rc_pos, rc_cigar, ref_length)
+    return fwd_cigar
 
 
 def score_alignment(

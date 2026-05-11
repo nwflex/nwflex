@@ -12,17 +12,22 @@ from nwflex.simulation import (
     BwaBothStrandsResult,
     BwaResult,
     Haplotype,
+    NwflexResult,
     Read,
     _parse_sam_line,
     align_bwa,
     align_bwa_both_strands,
+    align_nwflex,
     build_haplotype,
     build_locus_from_panel,
+    build_mirror_frame,
     clean_flank_window,
     decode_z_bp,
     flank_bases_consumed,
     is_arm_correct,
     parse_cigar,
+    project_alignment_to_ref,
+    rc_cigar_to_forward,
     rc_to_forward_alignment,
     render_zoom,
     reverse_complement,
@@ -293,6 +298,72 @@ class TestTileReads:
 # reverse_complement
 # ---------------------------------------------------------------------------
 
+class TestBuildMirrorFrame:
+    """build_mirror_frame — mirror one or two references in one call."""
+
+    @staticmethod
+    def _read(seq, var_start, lf, rf):
+        return Read(sequence=seq, var_start=var_start,
+                    lflank_extent=lf, rflank_extent=rf)
+
+    def test_returns_three_tuple_without_extras(self):
+        out = build_mirror_frame("AACCGGTT", reads=[], zone=(2, 6))
+        assert len(out) == 3
+        rc_ref, rc_reads, rc_zone = out
+        assert rc_ref == "AACCGGTT"  # palindrome
+        assert rc_reads == []
+        assert rc_zone == (2, 6)
+
+    def test_zone_is_mirrored(self):
+        # 8 bp reference, forward zone (1, 4) → mirror zone (8-4, 8-1) = (4, 7).
+        _, _, rc_zone = build_mirror_frame("AAAACCCC", reads=[], zone=(1, 4))
+        assert rc_zone == (4, 7)
+
+    def test_reads_have_rc_sequence_and_swapped_extents(self):
+        r = self._read("ACGT", var_start=12, lf=3, rf=5)
+        _, rc_reads, _ = build_mirror_frame("AAAA", reads=[r], zone=(0, 1))
+        (rc_r,) = rc_reads
+        assert rc_r.sequence == "ACGT"  # palindrome
+        assert rc_r.var_start == 12
+        assert rc_r.lflank_extent == 5  # swapped with rf
+        assert rc_r.rflank_extent == 3
+
+    def test_returns_five_tuple_with_extras(self):
+        out = build_mirror_frame(
+            "AACCGGTT", reads=[], zone=(2, 6),
+            extra_reference="GGGGAAAA", extra_zone=(4, 7),
+        )
+        assert len(out) == 5
+        _, _, _, rc_extra, rc_extra_zone = out
+        # extra_ref length 8, extra_zone (4, 7) → rc_extra_zone (1, 4).
+        assert rc_extra == reverse_complement("GGGGAAAA")
+        assert rc_extra_zone == (1, 4)
+
+    def test_extras_do_not_affect_primary(self):
+        primary_only = build_mirror_frame(
+            "AACCGGTT", reads=[], zone=(2, 6),
+        )
+        with_extras = build_mirror_frame(
+            "AACCGGTT", reads=[], zone=(2, 6),
+            extra_reference="GGGGAAAA", extra_zone=(4, 7),
+        )
+        assert primary_only == with_extras[:3]
+
+    def test_only_extra_reference_raises(self):
+        with pytest.raises(ValueError, match="must be provided together"):
+            build_mirror_frame(
+                "AACCGGTT", reads=[], zone=(2, 6),
+                extra_reference="GGGGAAAA",
+            )
+
+    def test_only_extra_zone_raises(self):
+        with pytest.raises(ValueError, match="must be provided together"):
+            build_mirror_frame(
+                "AACCGGTT", reads=[], zone=(2, 6),
+                extra_zone=(4, 7),
+            )
+
+
 class TestReverseComplement:
     """reverse_complement — DNA reverse complement, preserving N."""
 
@@ -454,6 +525,84 @@ class TestAlignBwaBothStrands:
         for r in results:
             assert r.fwd.cigar and all(c.isdigit() or c in "MIDNSHP=X" for c in r.fwd.cigar)
             assert r.rc.cigar and all(c.isdigit() or c in "MIDNSHP=X" for c in r.rc.cigar)
+
+
+# ---------------------------------------------------------------------------
+# align_nwflex
+# ---------------------------------------------------------------------------
+
+class TestAlignNwflex:
+    """align_nwflex — direction-agnostic NW-flex harness."""
+
+    @pytest.fixture
+    def nwflex_setup(self, tiny_locus_reads):
+        from nwflex.default import get_default_scoring
+        from nwflex.ep_patterns import build_EP_STR_phase
+        from nwflex.repeats import STRLocus
+
+        locus, _, reads = tiny_locus_reads
+        # 3N extended reference for the EP-skip enumeration.
+        nwflex_locus = STRLocus(
+            A=locus.A, R=locus.R, N=3 * locus.N, B=locus.B,
+        )
+        ep = build_EP_STR_phase(
+            nwflex_locus.n, nwflex_locus.s, nwflex_locus.e, nwflex_locus.k,
+        )
+        score_matrix, gap_open, gap_extend, a2i = get_default_scoring("bwa_mem")
+        return dict(
+            reads=reads,
+            reference=nwflex_locus.X,
+            extra_predecessors=ep,
+            score_matrix=score_matrix,
+            gap_open=gap_open,
+            gap_extend=gap_extend,
+            alphabet_to_index=a2i,
+        )
+
+    def test_returns_one_result_per_read(self, nwflex_setup):
+        reads = nwflex_setup.pop("reads")
+        out = align_nwflex(nwflex_setup.pop("reference"), reads, **nwflex_setup)
+        assert len(out) == len(reads)
+        assert all(isinstance(r, NwflexResult) for r in out)
+
+    def test_pos_and_cigar_are_set(self, nwflex_setup):
+        reads = nwflex_setup.pop("reads")
+        out = align_nwflex(nwflex_setup.pop("reference"), reads, **nwflex_setup)
+        for r in out:
+            assert r.pos >= 1
+            assert r.cigar
+            assert all(c.isdigit() or c in "MIDNSHP=X"
+                       for c in r.cigar)
+
+    def test_score_matches_score_alignment(self, nwflex_setup):
+        # NW-flex's reported score must equal `score_alignment` on its own
+        # CIGAR under the same scheme — that is the contract of the global
+        # score for a global aligner.
+        from nwflex.simulation import score_alignment
+
+        reads = nwflex_setup["reads"]
+        sc_kw = dict(
+            score_matrix=nwflex_setup["score_matrix"],
+            gap_open=nwflex_setup["gap_open"],
+            gap_extend=nwflex_setup["gap_extend"],
+            alphabet_to_index=nwflex_setup["alphabet_to_index"],
+        )
+        out = align_nwflex(
+            nwflex_setup["reference"], reads,
+            extra_predecessors=nwflex_setup["extra_predecessors"],
+            **sc_kw,
+        )
+        for r, hit in zip(reads, out):
+            recomputed = score_alignment(
+                r.sequence, nwflex_setup["reference"],
+                hit.pos, hit.cigar, **sc_kw,
+            )
+            assert abs(hit.score - recomputed) < 1e-6
+
+    def test_empty_reads_returns_empty_list(self, nwflex_setup):
+        nwflex_setup.pop("reads")
+        out = align_nwflex(nwflex_setup.pop("reference"), [], **nwflex_setup)
+        assert out == []
 
 
 # ---------------------------------------------------------------------------
@@ -737,8 +886,86 @@ class TestRenderZoom:
 
 
 # ---------------------------------------------------------------------------
+# project_alignment_to_ref
+# ---------------------------------------------------------------------------
+
+class TestProjectAlignmentToRef:
+    """project_alignment_to_ref — CIGAR onto reference coordinates."""
+
+    def test_pure_match_fills_full_span(self):
+        # 5M at pos 1 against a 5 bp ref: each ref position carries the
+        # corresponding read base.
+        out = project_alignment_to_ref(5, 1, "5M", "GGGGG")
+        assert out == "GGGGG"
+
+    def test_offset_pos_leaves_bg_before_alignment(self):
+        # 3M at pos 3 against a 6 bp ref: positions 0 and 1 are off-span,
+        # positions 2..4 carry read bases, position 5 is off-span.
+        out = project_alignment_to_ref(6, 3, "3M", "ACG", bg_char=".")
+        assert out == "..ACG."
+
+    def test_deletion_writes_gap_char(self):
+        # 3M2D2M at pos 1 against a 7 bp ref: positions 0..2 carry read,
+        # 3..4 are gaps (D), 5..6 carry read.
+        out = project_alignment_to_ref(
+            7, 1, "3M2D2M", "ACGCT", gap_char="-", bg_char=".",
+        )
+        assert out == "ACG--CT"
+
+    def test_insertion_consumes_read_only(self):
+        # 3M2I2M at pos 1 against a 5 bp ref: I consumes 2 read bases but
+        # no ref positions; the projection is just the 3M + 2M bases.
+        out = project_alignment_to_ref(5, 1, "3M2I2M", "ACGXXTT")
+        assert out == "ACGTT"
+
+    def test_soft_clip_does_not_appear(self):
+        # 2S3M2S at pos 1 against a 3 bp ref: only the 3M positions are
+        # filled; the soft-clipped read bases are consumed silently.
+        out = project_alignment_to_ref(
+            3, 1, "2S3M2S", "XXACGYY", bg_char=".",
+        )
+        assert out == "ACG"
+
+    def test_hard_clip_consumes_nothing(self):
+        # 2H3M at pos 1 against a 3 bp ref: H consumes neither ref nor
+        # read; the 3M takes read positions 0..2 (read_seq has no
+        # hard-clipped bases per SAM convention).
+        out = project_alignment_to_ref(3, 1, "2H3M", "ACG")
+        assert out == "ACG"
+
+    def test_skip_op_writes_gap_char(self):
+        # 2M3N2M at pos 1: skipped ref behaves like a delete for the
+        # projection (a gap on the read line over those ref columns).
+        out = project_alignment_to_ref(
+            7, 1, "2M3N2M", "ACGT", gap_char="-", bg_char=".",
+        )
+        assert out == "AC---GT"
+
+    def test_unsupported_op_raises(self):
+        with pytest.raises(ValueError, match="unsupported CIGAR op"):
+            project_alignment_to_ref(5, 1, "5P", "AAAAA")
+
+
+# ---------------------------------------------------------------------------
 # rc_to_forward_alignment
 # ---------------------------------------------------------------------------
+
+class TestRcCigarToForward:
+    """rc_cigar_to_forward — return only the forward-strand CIGAR."""
+
+    def test_matches_rc_to_forward_alignment_cigar(self):
+        # Should return the same CIGAR rc_to_forward_alignment computes,
+        # just without the position.
+        rc_pos, rc_cigar, ref_len = 7, "3M2D2I8M", 30
+        _, expected = rc_to_forward_alignment(rc_pos, rc_cigar, ref_len)
+        assert rc_cigar_to_forward(rc_pos, rc_cigar, ref_len) == expected
+
+    def test_round_trip_is_identity(self):
+        # Flipping the CIGAR twice with consistent positions reproduces it.
+        rc_pos, rc_cigar, ref_len = 7, "3M2D2I8M", 30
+        fwd_pos, fwd_cigar = rc_to_forward_alignment(rc_pos, rc_cigar, ref_len)
+        assert rc_cigar_to_forward(fwd_pos, fwd_cigar, ref_len) == rc_cigar
+
 
 class TestRcToForwardAlignment:
     """rc_to_forward_alignment — flip an rc-strand hit to forward coords."""

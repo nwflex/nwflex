@@ -33,12 +33,16 @@ from .core import (
     align_bwa_both_strands,
     reverse_complement,
     build_mirror_frame,
+    # NW-flex harness
+    NwflexResult,
+    align_nwflex,
     # CIGAR parsing + Z decoding
     parse_cigar,
     decode_z_bp,
     flank_bases_consumed,
     is_arm_correct,
     rc_to_forward_alignment,
+    rc_cigar_to_forward,
     bwa_verdict_both_strands,
     alignment_state,
     combine_states,
@@ -51,7 +55,13 @@ from .core import (
     _parse_sam_line,
 )
 
-from .viz import render_zoom, plot_correctness_heatmap, plot_layout_schematic
+from .viz import (
+    render_zoom,
+    plot_correctness_heatmap,
+    plot_layout_schematic,
+    project_alignment_to_ref,
+    plot_alignment_pileup,
+)
 
 
 __all__ = [
@@ -70,12 +80,15 @@ __all__ = [
     "align_bwa_both_strands",
     "reverse_complement",
     "build_mirror_frame",
+    "NwflexResult",
+    "align_nwflex",
     # CIGAR + Z
     "parse_cigar",
     "decode_z_bp",
     "flank_bases_consumed",
     "is_arm_correct",
     "rc_to_forward_alignment",
+    "rc_cigar_to_forward",
     "bwa_verdict_both_strands",
     "alignment_state",
     "combine_states",
@@ -88,4 +101,6 @@ __all__ = [
     "render_zoom",
     "plot_correctness_heatmap",
     "plot_layout_schematic",
+    "project_alignment_to_ref",
+    "plot_alignment_pileup",
 ]
