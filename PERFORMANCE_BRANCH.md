@@ -18,9 +18,11 @@ simulated haplotypes whose repeat count differs from the reference.
 
 **BWA-MEM at standard parameters** is mostly wrong on these reads:
 soft-clipping at the boundary consumes part of the flank and the
-repeat length is unmeasured — and the soft-clip alignment scores
-*above* the truth-shape alignment under standard affine-gap, so this
-is a real failure of the score landscape, not just tie-breaking.
+repeat length is unmeasured. Under principled scoring (soft-clip
+charged the same affine-gap penalty as a deletion of the same
+length), the truth-shape alignment strictly outscores the soft-clip,
+so this is a heuristic-miss failure rather than a score-landscape
+one.
 
 **Disabling soft-clipping** recovers many cells, but BWA's
 seed-and-extend heuristic is direction-dependent: in a noticeable
@@ -63,17 +65,21 @@ Throughout the notebooks we are careful to distinguish two scores:
   alignment has no SW counterpart.
 
 - **NW (Needleman-Wunsch / global) score** — affine-gap walked over
-  a full CIGAR with soft-clips treated as free, computed via
-  `score_alignment` in `simulation.core`. NW score is well-defined
-  for any CIGAR (BWA's output, NW-flex's output, or a constructed
-  truth alignment) and matches NW-flex's reported `RefAligner` score
-  by construction. We use it whenever we *evaluate* an alignment.
+  a full CIGAR with soft-clips charged the same affine-gap penalty
+  as a deletion of the same length, computed via `score_alignment`
+  in `simulation.core`. NW score is well-defined for any CIGAR
+  (BWA's output, NW-flex's output, or a constructed truth alignment)
+  and matches NW-flex's reported `RefAligner` score by construction
+  on CIGARs without soft-clip ops. We use it whenever we *evaluate*
+  an alignment.
 
-For boundary BWA reads under no-clip, SW and NW disagree by up to 8
-points (BWA's `AS = 146` for an alignment whose NW score is 138).
-This is a documented BWA-MEM choice (`mem_chain2aln` keeps the local
-extension's `max` even after switching to the global path); we
-sidestep it by always rescoring under NW.
+SW and NW can disagree on BWA-MEM hits for two independent reasons:
+under no-clip, BWA's `mem_chain2aln` keeps the local extension's
+`max` even after switching to the global path, so e.g. `AS = 146` for
+an alignment whose NW score is 138; under standard parameters a
+soft-clipped tail adds another affine-gap charge on the NW side
+(e.g. `AS = 146` for `146M4S`, NW = 136). We sidestep both by always
+rescoring under NW.
 
 ## Verdict
 
@@ -184,13 +190,16 @@ We run the simulation with the haplotype flanks unchanged and the
 repeat count varying over $N + \Delta$ for a small range of $\Delta$.
 
 NW-flex is uniformly **length-correct**. BWA-MEM at standard
-parameters is mostly *outscored* except for a thin $\Delta \approx 0$
-stripe — soft-clipping wins under standard affine-gap. The no-clip
-arm shows a stair-step: many length-correct cells, but for negative-$\Delta$
-reads at small lflank, BWA's heuristic in one direction is a *miss*
-even though truth has a strictly higher NW score (the other
-direction often finds it). The triangle visualization makes the
-strand asymmetry direct.
+parameters is mostly *missed* — the heuristic chose a soft-clip
+alignment whose NW score (with soft-clip charged like a deletion)
+sits below the truth-shape alignment's. A smaller band of cells
+still flips to *outscored*, reflecting reads where BWA-MEM picks a
+non-truth, non-clip alignment that beats truth on the score
+landscape. The no-clip arm shows a stair-step: many length-correct
+cells, but for negative-$\Delta$ reads at small lflank, BWA's
+heuristic in one direction is a miss even though truth has a strictly
+higher NW score (the other direction often finds it). The triangle
+visualization makes the strand asymmetry direct.
 
 #### Second comparison — a single SNV in the flank
 

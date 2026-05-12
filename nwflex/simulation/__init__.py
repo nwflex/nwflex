@@ -50,6 +50,16 @@ from .core import (
     score_alignment,
     bwa_truth_cigar,
     nwflex_truth_cigar,
+    # Compound-repeat primitives
+    CompoundLocus,
+    build_compound_locus_from_panel,
+    CompoundHaplotype,
+    build_compound_haplotype,
+    build_compound_mirror_frame,
+    is_arm_correct_multi,
+    bwa_compound_truth_cigar,
+    nwflex_compound_truth_cigar,
+    alignment_state_multi,
     # Internal SAM parser (used by tests)
     _parse_sam_line,
 )
@@ -58,14 +68,26 @@ from .viz import (
     render_zoom,
     plot_correctness_heatmap,
     plot_correctness_heatmap_rows,
+    plot_correctness_heatmap_2d,
+    plot_correctness_heatmap_2d_rows,
+    plot_proportion_heatmap_2d,
+    plot_proportion_heatmap_2d_rows,
     plot_layout_schematic,
+    plot_compound_layout_schematic,
     project_alignment_to_ref,
 )
 
 from .sweep import (
     SweepVariant,
+    make_variant,
     sweep,
     pivot_for_heatmap,
+    wrap_methods_for_multizone_truth,
+    aggregate_per_cell,
+    BWAMethod,
+    NWFlexMethod,
+    BWACompoundMethod,
+    NWFlexCompoundMethod,
 )
 
 
@@ -101,14 +123,36 @@ __all__ = [
     "score_alignment",
     "bwa_truth_cigar",
     "nwflex_truth_cigar",
+    # Compound-repeat primitives
+    "CompoundLocus",
+    "build_compound_locus_from_panel",
+    "CompoundHaplotype",
+    "build_compound_haplotype",
+    "build_compound_mirror_frame",
+    "is_arm_correct_multi",
+    "bwa_compound_truth_cigar",
+    "nwflex_compound_truth_cigar",
+    "alignment_state_multi",
     # Viz
     "render_zoom",
     "plot_correctness_heatmap",
     "plot_correctness_heatmap_rows",
+    "plot_correctness_heatmap_2d",
+    "plot_correctness_heatmap_2d_rows",
+    "plot_proportion_heatmap_2d",
+    "plot_proportion_heatmap_2d_rows",
     "plot_layout_schematic",
+    "plot_compound_layout_schematic",
     "project_alignment_to_ref",
     # Sweep harness
     "SweepVariant",
+    "make_variant",
     "sweep",
     "pivot_for_heatmap",
+    "wrap_methods_for_multizone_truth",
+    "aggregate_per_cell",
+    "BWAMethod",
+    "NWFlexMethod",
+    "BWACompoundMethod",
+    "NWFlexCompoundMethod",
 ]

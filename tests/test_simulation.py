@@ -25,6 +25,7 @@ from nwflex.simulation import (
     decode_z_bp,
     flank_bases_consumed,
     is_arm_correct,
+    is_arm_correct_multi,
     mirror_reads,
     parse_cigar,
     pivot_for_heatmap,
@@ -652,6 +653,68 @@ class TestAlignNwflex:
 
 
 # ---------------------------------------------------------------------------
+# score_alignment
+# ---------------------------------------------------------------------------
+
+class TestScoreAlignment:
+    """score_alignment — recompute NW affine-gap score from a CIGAR.
+
+    Soft-clip ``S`` is charged the same affine-gap penalty as a deletion
+    of the same length; ``N`` and ``H``/``P`` contribute nothing.
+    """
+
+    # match=+1, mismatch=-1, gap_open=-3, gap_extend=-1.
+    SCORE_KW = dict(
+        score_matrix=[[+1, -1, -1, -1],
+                      [-1, +1, -1, -1],
+                      [-1, -1, +1, -1],
+                      [-1, -1, -1, +1]],
+        gap_open=-3.0,
+        gap_extend=-1.0,
+        alphabet_to_index={"A": 0, "C": 1, "G": 2, "T": 3},
+    )
+
+    def _score(self, read, ref, cigar, pos=1):
+        from nwflex.simulation import score_alignment
+        return score_alignment(read, ref, pos, cigar, **self.SCORE_KW)
+
+    def test_perfect_match(self):
+        assert self._score("AAAA", "AAAA", "4M") == 4
+
+    def test_mismatch_contributes_negative(self):
+        # 2 matches + 2 mismatches = +2 - 2 = 0.
+        assert self._score("AAAA", "AACC", "4M") == 0
+
+    def test_insertion_gap_cost(self):
+        # 2M3I2M with all matches: 4 + (-3 + 3*-1) = -2.
+        assert self._score("AACCCAA", "AAAA", "2M3I2M") == -2
+
+    def test_deletion_gap_cost(self):
+        # 2M3D2M with all matches: 4 + (-3 + 3*-1) = -2.
+        assert self._score("AAAA", "AACCCAA", "2M3D2M") == -2
+
+    def test_soft_clip_charged_like_deletion(self):
+        # 4M then 3S: 4 + (-3 + 3*-1) = -2.  Same gap cost as 3I/3D.
+        assert self._score("AAAACCC", "AAAA", "4M3S") == -2
+
+    def test_leading_soft_clip_charged(self):
+        # 3S then 4M: 4 + (-3 + 3*-1) = -2.
+        assert self._score("CCCAAAA", "AAAA", "3S4M") == -2
+
+    def test_leading_and_trailing_soft_clip_both_charged(self):
+        # 2S4M2S: 4 + 2*(-3 + 2*-1) = -6.  Two distinct gap-open events.
+        assert self._score("CCAAAACC", "AAAA", "2S4M2S") == -6
+
+    def test_n_op_is_free(self):
+        # 2M2N2M consumes ref through N for free: 4 matches → 4.
+        assert self._score("AAAA", "AACCAA", "2M2N2M") == 4
+
+    def test_hard_clip_and_padding_contribute_nothing(self):
+        assert self._score("AAAA", "AAAA", "1H4M1H") == 4
+        assert self._score("AAAA", "AAAA", "1P4M1P") == 4
+
+
+# ---------------------------------------------------------------------------
 # parse_cigar
 # ---------------------------------------------------------------------------
 
@@ -846,6 +909,73 @@ class TestIsArmCorrect:
             "1M2I11M", 10, self.Z_START, self.Z_END,
             truth_z_bp=12, convention="nwflex",
         )
+
+
+# ---------------------------------------------------------------------------
+# is_arm_correct_multi
+# ---------------------------------------------------------------------------
+
+class TestIsArmCorrectMulti:
+    """is_arm_correct_multi — multi-zone variant.
+
+    Outer-span check must work the same way regardless of whether
+    ``ref_zones`` is listed in monotonic (fwd) order or non-monotonic
+    (rc) order.  Per-block z_bp check is independent of zone ordering.
+    """
+
+    # Two zones: [10, 20) and [22, 30).  Outer flanks in fwd order are
+    # ref < 10 and ref >= 30.
+    FWD_ZONES = [(10, 20), (22, 30)]
+    # Same two zones, but listed in non-monotonic order (rc convention
+    # keeps the logical [block1, block2] order, which after rc-reversal
+    # flips the address order).
+    RC_ZONES  = [(22, 30), (10, 20)]
+    TRUTH = (10, 8)  # block 1 has 10 read bp inside, block 2 has 8
+
+    def test_fwd_zones_correct_when_flanks_covered(self):
+        # 40M from pos 1: covers ref [0, 40).  Inside block1=10, block2=8
+        # (8 ref bp in [22, 30), all matched).  Left flank = 10 bp,
+        # right flank = 10 bp.
+        per_block, ok = is_arm_correct_multi(
+            "40M", 1, self.FWD_ZONES, self.TRUTH, convention="bwa",
+        )
+        assert per_block == [True, True]
+        assert ok
+
+    def test_rc_zones_correct_when_flanks_covered(self):
+        # Same 40M alignment as above, but zones listed in rc order.
+        # Outer endpoints must be derived as min/max so the span check
+        # still asks for ref < 10 and ref >= 30.
+        per_block, ok = is_arm_correct_multi(
+            "40M", 1, self.RC_ZONES, (8, 10), convention="bwa",
+        )
+        assert per_block == [True, True]
+        assert ok
+
+    def test_rc_zones_missing_outer_left_flank_is_incorrect(self):
+        # CIGAR starts at pos 11 (1-based) = ref idx 10: aligns inside
+        # block 1 directly, with no ref bp consumed before the leftmost
+        # outer boundary (ref < 10).  Even if per-block z_bp matches,
+        # the outer span check must fail.  Old code used outer_s = 22
+        # (first listed zone start) which would incorrectly count
+        # ref bp in [10, 22) as "left flank" and pass.
+        per_block, ok = is_arm_correct_multi(
+            "10M2D8M10M", 11, self.RC_ZONES, (8, 10),
+            convention="bwa",
+        )
+        # block1 (= rc_zones[0] = [22, 30)) gets 8 read bp; block2 (= rc_zones[1] = [10, 20)) gets 10 read bp.
+        assert per_block == [True, True]
+        assert not ok  # spans must fail: 0 ref bp consumed at ref < 10
+
+    def test_fwd_zones_missing_outer_left_flank_is_incorrect(self):
+        # Same alignment shape as above but with zones in fwd order.
+        # outer_s = min = 10 in either ordering, so behaviour matches.
+        per_block, ok = is_arm_correct_multi(
+            "10M2D8M10M", 11, self.FWD_ZONES, self.TRUTH,
+            convention="bwa",
+        )
+        assert per_block == [True, True]
+        assert not ok
 
 
 # ---------------------------------------------------------------------------

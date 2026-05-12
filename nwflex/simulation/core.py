@@ -1043,20 +1043,27 @@ def score_alignment(
     ``ref`` and ``read`` under the affine-gap scheme used elsewhere in
     this notebook (and by ``RefAligner``).
 
-    This is a Needleman-Wunsch-style global score: every CIGAR op
+    This is a strict Needleman-Wunsch global score: every CIGAR op
     contributes, with no edge bonuses or position-dependent
-    adjustments.  It is the right thing to compare to the value
-    reported by NW-flex's ``RefAligner.align_simple`` (they match by
-    construction), but **does not** match BWA-MEM's reported SW
-    ``AS:i:`` tag in general — BWA's AS is the local-extension maximum,
-    which can land at an interior cell when the optimal global path
-    dips through an indel.
+    adjustments. It matches NW-flex's ``RefAligner.align_simple``
+    score by construction on CIGARs without soft-clip ops (the
+    standard ``free_X = free_Y = False`` configuration used by
+    :func:`align_nwflex`); in semiglobal RefAligner mode, RefAligner
+    emits ``S`` for its free edges and reports a score that does not
+    charge them, while this function does — so the two diverge by the
+    affine-gap cost of those ``S`` runs.  This function **does not**
+    match BWA-MEM's reported SW ``AS:i:`` tag in general — BWA's AS
+    is the local-extension maximum, which can land at an interior
+    cell when the optimal global path dips through an indel.
 
     Per-base match/mismatch contributions come from ``score_matrix``
     (indexed via ``alphabet_to_index``).  A gap of length ``L`` costs
     ``gap_open + L * gap_extend`` (signs as supplied — typically both
     negative).  ``N`` (skipped reference) is free; ``S`` (soft-clip)
-    consumes read bases at no cost; ``H`` and ``P`` contribute nothing.
+    is charged the same affine-gap penalty as a deletion of the same
+    length — leading/terminal read bases that don't align should not
+    score better than read bases that do align poorly; ``H`` and ``P``
+    contribute nothing.
 
     Parameters
     ----------
@@ -1096,6 +1103,7 @@ def score_alignment(
         elif op == "N":
             ref_pos += length
         elif op == "S":
+            score += gap_open + length * gap_extend
             read_pos += length
         elif op in ("H", "P"):
             pass
@@ -1284,4 +1292,298 @@ def combine_states(state_a: str, state_b: str, policy: str = "best") -> str:
         return state_a if a_pri <= b_pri else state_b
     return state_a if a_pri >= b_pri else state_b
 
+
+# ===========================================================================
+# Compound-repeat primitives
+# ===========================================================================
+#
+# Two-block compound reference X = A · R1^N1 · M · R2^N2 · B and its
+# extended counterpart with f·N1, f·N2 copies for NW-flex's EP pattern.
+# Functions here mirror their single-repeat counterparts above
+# (Locus / Haplotype / build_mirror_frame / is_arm_correct /
+# bwa_truth_cigar / nwflex_truth_cigar / alignment_state).
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class CompoundLocus:
+    """Compound STR locus X = A · R1^N1 · M · R2^N2 · B with both the BWA
+    reference (N1, N2) and the NW-flex extended reference (f·N1, f·N2)
+    bundled in one object."""
+    A: str
+    R1: str
+    N1: int
+    M: str
+    R2: str
+    N2: int
+    B: str
+    nwflex_factor: int = 3
+
+    @property
+    def k1(self) -> int: return len(self.R1)
+    @property
+    def k2(self) -> int: return len(self.R2)
+    @property
+    def s1(self) -> int: return len(self.A)
+    @property
+    def e1(self) -> int: return self.s1 + self.k1 * self.N1
+    @property
+    def s2(self) -> int: return self.e1 + len(self.M)
+    @property
+    def e2(self) -> int: return self.s2 + self.k2 * self.N2
+    @property
+    def X(self) -> str:
+        return (self.A + self.R1 * self.N1 + self.M
+                + self.R2 * self.N2 + self.B)
+    @property
+    def zones(self) -> List[Tuple[int, int]]:
+        return [(self.s1, self.e1), (self.s2, self.e2)]
+    @property
+    def X_ext(self) -> str:
+        f = self.nwflex_factor
+        return (self.A + self.R1 * (f * self.N1) + self.M
+                + self.R2 * (f * self.N2) + self.B)
+    @property
+    def zones_ext(self) -> List[Tuple[int, int]]:
+        f = self.nwflex_factor
+        s1 = len(self.A)
+        e1 = s1 + self.k1 * (f * self.N1)
+        s2 = e1 + len(self.M)
+        e2 = s2 + self.k2 * (f * self.N2)
+        return [(s1, e1), (s2, e2)]
+
+
+def build_compound_locus_from_panel(
+    panel, *,
+    motif1_len: int, motif2_len: int,
+    ref_n1: int, ref_n2: int,
+    bridge_n1: int, bridge_n2: int,
+    flank_len: int,
+    nwflex_factor: int = 3,
+) -> CompoundLocus:
+    """Pick two panel rows with distinct motif lengths; A and R1 come from
+    row 1, B and R2 from row 2; M is composed from the interior edges of
+    both panel flanks, each half cleaned against its adjacent motif."""
+    row1 = panel[panel["type"].str.len() == motif1_len].iloc[0]
+    row2 = panel[panel["type"].str.len() == motif2_len].iloc[0]
+    R1, R2 = row1["type"], row2["type"]
+    A = clean_flank_window(R1, row1["lflank"], flank_len, "left")
+    B = clean_flank_window(R2, row2["rflank"], flank_len, "right")
+    M_left = (clean_flank_window(R1, row1["rflank"], bridge_n1, "right")
+              if bridge_n1 > 0 else "")
+    M_right = (clean_flank_window(R2, row2["lflank"], bridge_n2, "left")
+               if bridge_n2 > 0 else "")
+    return CompoundLocus(
+        A=A, R1=R1, N1=ref_n1,
+        M=M_left + M_right,
+        R2=R2, N2=ref_n2, B=B,
+        nwflex_factor=nwflex_factor,
+    )
+
+
+@dataclass(frozen=True)
+class CompoundHaplotype:
+    """Compound haplotype, duck-typed for tile_reads via flank_len /
+    body_len. The body spans both repeat blocks plus the bridge:
+    body_len = k1·(N1+Δ1) + |M| + k2·(N2+Δ2)."""
+    sequence: str
+    flank_len: int
+    body_len: int
+    body_lens: Tuple[int, int]
+    delta1: int
+    delta2: int
+    snv_pos: Optional[int] = None
+    snv_base: Optional[str] = None
+
+
+def build_compound_haplotype(
+    compound: CompoundLocus, *, delta1: int, delta2: int,
+    snv: Optional[Tuple[int, str]] = None,
+) -> CompoundHaplotype:
+    n1 = compound.N1 + delta1
+    n2 = compound.N2 + delta2
+    if n1 < 0 or n2 < 0:
+        raise ValueError(
+            f"compound haplotype counts must be >= 0: ({n1}, {n2})"
+        )
+    seq = (compound.A + compound.R1 * n1 + compound.M
+           + compound.R2 * n2 + compound.B)
+    body1 = compound.k1 * n1
+    body2 = compound.k2 * n2
+    body_len = body1 + len(compound.M) + body2
+    snv_pos: Optional[int] = None
+    snv_base: Optional[str] = None
+    if snv is not None:
+        abs_pos, base = snv
+        if not (0 <= abs_pos < len(seq)):
+            raise ValueError(
+                f"SNV abs_pos {abs_pos} out of range [0, {len(seq)})"
+            )
+        if len(base) != 1:
+            raise ValueError(f"SNV base must be a single character, got {base!r}")
+        seq = seq[:abs_pos] + base + seq[abs_pos + 1:]
+        snv_pos = abs_pos
+        snv_base = base
+    return CompoundHaplotype(
+        sequence=seq, flank_len=len(compound.A), body_len=body_len,
+        body_lens=(body1, body2), delta1=delta1, delta2=delta2,
+        snv_pos=snv_pos, snv_base=snv_base,
+    )
+
+
+def build_compound_mirror_frame(compound: CompoundLocus, reads):
+    """Compound analogue of build_mirror_frame: rc the BWA reference, the
+    NW-flex extended reference, the reads, and both pairs of zones.
+    Indexed zone-by-zone (``rc_zones[i]`` is the rc of forward
+    ``zones[i]``) so a per-block truth comparison can keep the same
+    ``i`` mapping in both frames."""
+    rc_X = reverse_complement(compound.X)
+    rc_X_ext = reverse_complement(compound.X_ext)
+    rc_reads = mirror_reads(reads)
+    n = len(compound.X)
+    n_ext = len(compound.X_ext)
+    rc_zones = [(n - e, n - s) for (s, e) in compound.zones]
+    rc_zones_ext = [(n_ext - e, n_ext - s) for (s, e) in compound.zones_ext]
+    return rc_X, rc_X_ext, rc_reads, rc_zones, rc_zones_ext
+
+
+def is_arm_correct_multi(
+    cigar, start_pos_1based, ref_zones, truth_z_bps, *,
+    convention: str, min_flank: int = 1,
+):
+    """Return ``(per_block_correct, all_correct)``.
+
+    Per-block check: ``decode_z_bp`` inside each zone must equal the
+    corresponding truth bp. Outer span check: the alignment must consume
+    at least ``min_flank`` reference bp outside both the leftmost and
+    rightmost zones (so it actually spans both blocks).
+
+    Outer endpoints are computed as ``min`` / ``max`` over zone starts
+    / ends so the check is orientation-agnostic — fwd zones (listed in
+    increasing ref-address order) and rc zones (where the rc reversal
+    flips the address order while preserving logical ``[block1, block2]``
+    listing) both resolve to the actual outer ref boundaries.
+    """
+    if cigar is None or start_pos_1based is None:
+        return [False] * len(ref_zones), False
+    per_block = []
+    for (zs, ze), tbp in zip(ref_zones, truth_z_bps):
+        zbp = decode_z_bp(cigar, start_pos_1based, zs, ze,
+                          convention=convention)
+        per_block.append(zbp == tbp)
+    outer_s = min(z[0] for z in ref_zones)
+    outer_e = max(z[1] for z in ref_zones)
+    left, right = flank_bases_consumed(
+        cigar, start_pos_1based, outer_s, outer_e,
+    )
+    spans = left >= min_flank and right >= min_flank
+    return per_block, all(per_block) and spans
+
+
+def _merge_m_ops(ops):
+    """Coalesce adjacent M ops; drop zero-length ops."""
+    merged = []
+    for length, op in ops:
+        if length == 0:
+            continue
+        if merged and merged[-1][1] == "M" and op == "M":
+            merged[-1] = (merged[-1][0] + length, "M")
+        else:
+            merged.append((length, op))
+    return merged
+
+
+def bwa_compound_truth_cigar(read, hap, compound: CompoundLocus):
+    """Compound BWA truth: gaps placed at the LEFT edge of each repeat
+    block so the BWA boundary convention counts insertions as inside."""
+    L = read.lflank_extent
+    Rf = read.rflank_extent
+    d1, d2 = hap.delta1, hap.delta2
+    k1, k2 = compound.k1, compound.k2
+    N1, N2 = compound.N1, compound.N2
+    bridge = len(compound.M)
+    pos = (compound.s1 - L) + 1
+    ops = []
+    if L > 0:
+        ops.append((L, "M"))
+    if d1 > 0:
+        ops.append((d1 * k1, "I"))
+        ops.append((N1 * k1, "M"))
+    elif d1 < 0:
+        ops.append((-d1 * k1, "D"))
+        ops.append(((N1 + d1) * k1, "M"))
+    else:
+        ops.append((N1 * k1, "M"))
+    if bridge > 0:
+        ops.append((bridge, "M"))
+    if d2 > 0:
+        ops.append((d2 * k2, "I"))
+        ops.append((N2 * k2, "M"))
+    elif d2 < 0:
+        ops.append((-d2 * k2, "D"))
+        ops.append(((N2 + d2) * k2, "M"))
+    else:
+        ops.append((N2 * k2, "M"))
+    if Rf > 0:
+        ops.append((Rf, "M"))
+    merged = _merge_m_ops(ops)
+    cigar = "".join(f"{l}{o}" for l, o in merged)
+    return pos, cigar
+
+
+def nwflex_compound_truth_cigar(read, hap, compound: CompoundLocus):
+    """Compound NW-flex truth against the extended (f·N1, f·N2)
+    reference: free-skip past the unused motifs at the LEFT edge of each
+    block (an N op), then walk the haplotype's block bases as M."""
+    L = read.lflank_extent
+    Rf = read.rflank_extent
+    d1, d2 = hap.delta1, hap.delta2
+    k1, k2 = compound.k1, compound.k2
+    N1, N2 = compound.N1, compound.N2
+    f = compound.nwflex_factor
+    bridge = len(compound.M)
+    pos = (compound.zones_ext[0][0] - L) + 1
+    skip1 = (f * N1 - (N1 + d1)) * k1
+    skip2 = (f * N2 - (N2 + d2)) * k2
+    body1 = (N1 + d1) * k1
+    body2 = (N2 + d2) * k2
+    if skip1 < 0 or skip2 < 0:
+        raise ValueError(
+            f"hap counts exceed NW-flex extended ref: "
+            f"({N1 + d1}, {N2 + d2}) vs ({f * N1}, {f * N2})"
+        )
+    ops = []
+    if L > 0:      ops.append((L, "M"))
+    if skip1 > 0:  ops.append((skip1, "N"))
+    if body1 > 0:  ops.append((body1, "M"))
+    if bridge > 0: ops.append((bridge, "M"))
+    if skip2 > 0:  ops.append((skip2, "N"))
+    if body2 > 0:  ops.append((body2, "M"))
+    if Rf > 0:     ops.append((Rf, "M"))
+    merged = _merge_m_ops(ops)
+    cigar = "".join(f"{l}{o}" for l, o in merged)
+    return pos, cigar
+
+
+def alignment_state_multi(
+    cigar, pos_1based, chosen_score, truth_score,
+    ref_zones, truth_z_bps, *,
+    convention: str, min_flank: int = 1,
+) -> str:
+    """Compound analogue of :func:`alignment_state`. Returns P / T / M / D
+    using :func:`is_arm_correct_multi` for the length axis and the
+    chosen-vs-truth score comparison for the score axis."""
+    if cigar is None or pos_1based is None or chosen_score is None:
+        return "D"
+    _, ok = is_arm_correct_multi(
+        cigar, pos_1based, ref_zones, truth_z_bps,
+        convention=convention, min_flank=min_flank,
+    )
+    if ok:
+        return "P"
+    if chosen_score > truth_score:
+        return "D"
+    if chosen_score < truth_score:
+        return "M"
+    return "T"
 
