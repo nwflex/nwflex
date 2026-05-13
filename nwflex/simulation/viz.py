@@ -957,6 +957,37 @@ def plot_correctness_heatmap(
     return fig
 
 
+def _rows_top_margin(fig_h: float, has_suptitle: bool):
+    """Figure-relative y coords for the title/legend block above panels.
+
+    Translates a fixed absolute-inch top reservation into figure-relative
+    coordinates so the forehead doesn't grow with ``n_rows``.  Used by
+    every ``_rows`` heatmap variant.
+
+    Layout (in inches from the top of the figure):
+
+    - suptitle baseline at ~0.22 in
+    - subtitle baseline at ~0.52 in (with suptitle) / 0.30 in (without)
+    - legend bottom at ~1.85 in (legend extends upward from there)
+    - panels start at ~2.2 in
+
+    Returns a dict with ``panel_top``, ``panel_bottom``, ``suptitle_y``,
+    ``subtitle_y``, ``legend_y`` — all in figure-relative coords.
+    """
+    top_in    = 2.2
+    bottom_in = 0.5
+    sup_in    = 0.22
+    sub_in    = 0.52 if has_suptitle else 0.30
+    leg_in    = 1.85
+    return dict(
+        panel_top    = 1.0 - top_in    / fig_h,
+        panel_bottom = bottom_in       / fig_h,
+        suptitle_y   = 1.0 - sup_in    / fig_h,
+        subtitle_y   = 1.0 - sub_in    / fig_h,
+        legend_y     = 1.0 - leg_in    / fig_h,
+    )
+
+
 def plot_correctness_heatmap_rows(
     rows,
     *,
@@ -1083,8 +1114,11 @@ def plot_correctness_heatmap_rows(
     # to the figure's left margin.  Two rows × ncol=3 (column-major):
     # col1 = score=truth (P,T), col2 = score≠truth (M,D),
     # col3 = strand shapes (fwd, rc).
-    panel_top = 0.84 if suptitle else 0.88
-    fig.subplots_adjust(left=0.07, right=0.98, top=panel_top, bottom=0.05)
+    # Margins reserved in absolute inches via _rows_top_margin so the
+    # forehead stays constant as n_rows grows.
+    m = _rows_top_margin(figsize[1], suptitle is not None)
+    fig.subplots_adjust(left=0.07, right=0.98,
+                        top=m["panel_top"], bottom=m["panel_bottom"])
 
     fig.legend(
         handles=legend_handles,
@@ -1092,7 +1126,7 @@ def plot_correctness_heatmap_rows(
         handler_map={_CircleHandle: _make_circle_handler()},
         ncol=3,
         loc="lower left",
-        bbox_to_anchor=(0.07, panel_top + 0.04),
+        bbox_to_anchor=(0.07, m["legend_y"]),
         frameon=True,
         fontsize=fontsize,
         handlelength=1.9, handleheight=1.9,
@@ -1102,11 +1136,10 @@ def plot_correctness_heatmap_rows(
     )
 
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.985,
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=m["suptitle_y"],
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        sub_y = 0.96 if suptitle else 0.985
-        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+        fig.text(0.5, m["subtitle_y"], subtitle, ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
 
@@ -1323,11 +1356,17 @@ def plot_correctness_heatmap_2d(
 
     # Single-row layout: legend goes in the right column so the top
     # strip is free for suptitle + subtitle without the legend crowding
-    # them.  ``right=0.82`` leaves ~18% of the figure width for the
-    # legend; the wider ``figsize`` keeps panel width comparable to
-    # the no-legend case.
-    panel_top = 0.90 if suptitle else 0.94
-    fig.subplots_adjust(left=0.06, right=0.82, top=panel_top, bottom=0.08)
+    # them.  Top reservation is in absolute inches so the title strip
+    # leaves room for both fig-level titles AND the per-panel axis
+    # titles (``ax.set_title``) below them without overlap.
+    fig_h = 5.8
+    top_in    = 1.30
+    bottom_in = 0.50
+    sup_in    = 0.20
+    sub_in    = 0.55 if suptitle is not None else 0.30
+    panel_top = 1.0 - top_in / fig_h
+    fig.subplots_adjust(left=0.06, right=0.82,
+                        top=panel_top, bottom=bottom_in / fig_h)
 
     legend_handles, legend_labels = _legend_handles_states_strands(
         color_recovered, color_co_optimal, color_dominant, color_dominated,
@@ -1345,11 +1384,12 @@ def plot_correctness_heatmap_2d(
     )
 
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.97,
+        fig.suptitle(suptitle, fontsize=title_size + 1,
+                     y=1.0 - sup_in / fig_h,
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        sub_y = 0.93 if suptitle else 0.96
-        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+        fig.text(0.5, 1.0 - sub_in / fig_h, subtitle,
+                 ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
 
@@ -1430,8 +1470,11 @@ def plot_correctness_heatmap_2d_rows(
         axes[r, 0].set_ylabel(f"{row_label}\n$\\Delta_2$",
                               fontsize=label_size, color="#222222")
 
-    panel_top = 0.84 if suptitle else 0.88
-    fig.subplots_adjust(left=0.07, right=0.98, top=panel_top, bottom=0.05)
+    # Absolute-inch top reservation via _rows_top_margin so the
+    # forehead stays constant as n_rows grows.
+    m = _rows_top_margin(figsize[1], suptitle is not None)
+    fig.subplots_adjust(left=0.07, right=0.98,
+                        top=m["panel_top"], bottom=m["panel_bottom"])
 
     legend_handles, legend_labels = _legend_handles_states_strands(
         color_recovered, color_co_optimal, color_dominant, color_dominated,
@@ -1440,7 +1483,7 @@ def plot_correctness_heatmap_2d_rows(
         handles=legend_handles, labels=legend_labels,
         handler_map={_CircleHandle: _make_circle_handler()},
         ncol=3, loc="lower left",
-        bbox_to_anchor=(0.07, panel_top + 0.04),
+        bbox_to_anchor=(0.07, m["legend_y"]),
         frameon=True, fontsize=fontsize,
         handlelength=1.9, handleheight=1.9,
         handletextpad=0.6, columnspacing=1.9,
@@ -1449,11 +1492,10 @@ def plot_correctness_heatmap_2d_rows(
     )
 
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.985,
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=m["suptitle_y"],
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        sub_y = 0.96 if suptitle else 0.985
-        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+        fig.text(0.5, m["subtitle_y"], subtitle, ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
 
@@ -1467,7 +1509,7 @@ def plot_proportion_heatmap_2d(
     fontsize: int = 14,
     suptitle: str | None = None,
     subtitle: str | None = None,
-    cbar_label: str = "fraction of reads with score = truth",
+    cbar_label: str = "P(score = truth)",
 ):
     """Continuous-color 2-D heatmap of the per-strand fraction of reads
     whose chosen alignment has score equal to truth (states P or T).
@@ -1516,15 +1558,27 @@ def plot_proportion_heatmap_2d(
                           fontsize=label_size, color="#222222")
 
     # Single-row layout: colorbar + shape legend on the right so the
-    # top strip is free for suptitle + subtitle.
-    panel_top = 0.90 if suptitle else 0.94
-    fig.subplots_adjust(left=0.06, right=0.82, top=panel_top, bottom=0.08)
+    # top strip is free for suptitle + subtitle.  Top reservation in
+    # absolute inches so axis titles don't crowd the subtitle.
+    fig_h = 5.8
+    top_in    = 1.30
+    bottom_in = 0.50
+    sup_in    = 0.20
+    sub_in    = 0.55 if suptitle is not None else 0.30
+    panel_top = 1.0 - top_in / fig_h
+    fig.subplots_adjust(left=0.06, right=0.82,
+                        top=panel_top, bottom=bottom_in / fig_h)
 
-    cbar_ax = fig.add_axes([0.85, 0.32, 0.018, 0.52])
+    # Colorbar on the right.  Shortened (h=0.36, top at 0.70) so the
+    # forward/reverse legend below has clearance; label moved to the
+    # LHS of the bar so it cannot overrun the legend.
+    cbar_ax = fig.add_axes([0.85, 0.34, 0.018, 0.36])
     sm = ScalarMappable(cmap=cmap, norm=norm)
     cbar = fig.colorbar(sm, cax=cbar_ax, orientation="vertical")
     cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
-    cbar.set_label(cbar_label, fontsize=fontsize, color="#222222")
+    cbar.ax.yaxis.set_label_position("left")
+    cbar.set_label(cbar_label, fontsize=fontsize, color="#222222",
+                   labelpad=8)
     cbar.ax.tick_params(labelsize=fontsize - 1, colors="#222222")
 
     shape_color = "#999999"
@@ -1536,7 +1590,7 @@ def plot_proportion_heatmap_2d(
         handles=shape_handles, labels=["forward", "reverse"],
         handler_map={_CircleHandle: _make_circle_handler()},
         ncol=1, loc="lower left",
-        bbox_to_anchor=(0.84, 0.10),
+        bbox_to_anchor=(0.84, 0.06),
         frameon=True, fontsize=fontsize,
         handlelength=1.9, handleheight=1.9,
         handletextpad=0.6,
@@ -1545,11 +1599,12 @@ def plot_proportion_heatmap_2d(
     )
 
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.97,
+        fig.suptitle(suptitle, fontsize=title_size + 1,
+                     y=1.0 - sup_in / fig_h,
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        sub_y = 0.93 if suptitle else 0.96
-        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+        fig.text(0.5, 1.0 - sub_in / fig_h, subtitle,
+                 ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
 
@@ -1567,7 +1622,7 @@ def plot_proportion_heatmap_2d_rows(
     scale: float = 1.0,
     suptitle: str | None = None,
     subtitle: str | None = None,
-    cbar_label: str = "fraction of reads with score = truth",
+    cbar_label: str = "P(score = truth)",
 ):
     """Multi-row variant of :func:`plot_proportion_heatmap_2d`."""
     import matplotlib.pyplot as plt
@@ -1622,10 +1677,19 @@ def plot_proportion_heatmap_2d_rows(
         axes[r, 0].set_ylabel(f"{row_label}\n$\\Delta_2$",
                               fontsize=label_size, color="#222222")
 
-    panel_top = 0.84 if suptitle else 0.88
-    fig.subplots_adjust(left=0.07, right=0.98, top=panel_top, bottom=0.05)
+    # Absolute-inch top reservation via _rows_top_margin so the
+    # forehead stays constant as n_rows grows.  Colorbar height is
+    # also fixed in inches so it doesn't bloat with figure height.
+    fig_h = figsize[1]
+    m = _rows_top_margin(fig_h, suptitle is not None)
+    fig.subplots_adjust(left=0.07, right=0.98,
+                        top=m["panel_top"], bottom=m["panel_bottom"])
 
-    cbar_ax = fig.add_axes([0.10, panel_top + 0.045, 0.45, 0.018])
+    cbar_height_in = 0.18
+    cbar_bottom_in = 1.30   # ~0.9 in above panel_top (panel_top at 2.2 in)
+    cbar_y_frac    = 1.0 - cbar_bottom_in / fig_h
+    cbar_h_frac    = cbar_height_in       / fig_h
+    cbar_ax = fig.add_axes([0.10, cbar_y_frac, 0.45, cbar_h_frac])
     sm = ScalarMappable(cmap=cmap, norm=norm)
     cbar = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
     cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
@@ -1641,7 +1705,7 @@ def plot_proportion_heatmap_2d_rows(
         handles=shape_handles, labels=["forward", "reverse"],
         handler_map={_CircleHandle: _make_circle_handler()},
         ncol=2, loc="lower left",
-        bbox_to_anchor=(0.62, panel_top + 0.04),
+        bbox_to_anchor=(0.62, cbar_y_frac),
         frameon=True, fontsize=fontsize,
         handlelength=1.9, handleheight=1.9,
         handletextpad=0.6, columnspacing=1.6,
@@ -1650,11 +1714,10 @@ def plot_proportion_heatmap_2d_rows(
     )
 
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.985,
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=m["suptitle_y"],
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        sub_y = 0.96 if suptitle else 0.985
-        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+        fig.text(0.5, m["subtitle_y"], subtitle, ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
 
@@ -1686,7 +1749,7 @@ def plot_compound_layout_schematic(
     ax=None,
     suptitle: str | None = None,
     subtitle: str | None = None,
-    figsize: Tuple[float, float] = (15.0, 5.6),
+    figsize: Tuple[float, float] = (12.0, 7.5),
     fontsize: int = 13,
 ):
     """Render the compound-locus layout schematic.
@@ -1699,7 +1762,7 @@ def plot_compound_layout_schematic(
     haplotype tiles.  Mirror mode flips the axis.
     """
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Rectangle
+    from matplotlib.patches import FancyBboxPatch, Rectangle
 
     standalone = ax is None
     if standalone:
@@ -1720,8 +1783,22 @@ def plot_compound_layout_schematic(
     n1_hap = max(ref_n1 + delta1_example, 0)
     n2_hap = max(ref_n2 + delta2_example, 0)
 
-    big_gap = 0.9
-    y_hap = 0.4
+    block1_panel_w = ref_n1 * tile_w
+    block2_panel_w = ref_n2 * tile_w
+    x_end = 2 * flank_w + block1_panel_w + bridge_w + block2_panel_w
+
+    # Read stack: three reads with varying lflank / rflank balance —
+    # same pattern as NB7's plot_layout_schematic so the compound
+    # schematic reads as another version of that figure.
+    read_lflanks = [flank_w * 0.20, flank_w * 0.45, flank_w * 0.70]
+    read_rflanks = [flank_w * 0.70, flank_w * 0.45, flank_w * 0.20]
+    n_reads = len(read_lflanks)
+    read_gap = 0.30
+    y_read_bot = 0.0
+    read_ys = [y_read_bot + k * (bar_h + read_gap) for k in range(n_reads)]
+
+    big_gap = 1.6   # NB7's row spacing
+    y_hap = read_ys[-1] + bar_h + big_gap
     if show_nwflex:
         y_nwf = y_hap + bar_h + big_gap
         y_ref = y_nwf + bar_h + big_gap
@@ -1733,25 +1810,39 @@ def plot_compound_layout_schematic(
     motif_color_1 = "#a6cee3"
     motif_color_2 = "#b2df8a"
     extra_color = "#fdd49e"
-    bridge_color = "#fde6c4"
+    # Bridge gets a firebrick family — distinct from the orange
+    # ``extra_color`` (+motif tiles), the blue / green motif colors,
+    # and the purple used for the ``B`` flank label.
+    bridge_color = "#e6b8b8"
+    bridge_edge  = "firebrick"
     nwflex_color_1 = "#dceaf3"
     nwflex_color_2 = "#e6f1d8"
     nwflex_edge_1 = "#5a9bc0"
     nwflex_edge_2 = "#6aa845"
     missing_edge = "#c0392b"
+    read_outline = "#08519c"
+
+    # Row labels: anchor outside the panel in both orientations.  In
+    # non-mirror, anchor at the left margin (data x < 0).  In mirror,
+    # anchor at the right margin (data x > x_end); xlim is widened on
+    # that side below so the text has room.
+    row_label_x = (x_end + 0.8) if mirror else -0.4
 
     def _row_label(y, text):
-        x = (flank_w * 2 + ref_n1 * tile_w + bridge_w + ref_n2 * tile_w + 0.5
-             if mirror else -0.4)
-        ha = "left" if mirror else "right"
-        ax.text(x, y + bar_h / 2, text, ha=ha, va="center",
+        ax.text(row_label_x, y + bar_h / 2, text, ha="right", va="center",
                 fontsize=fontsize + 1, fontweight="bold", color="#333333")
 
     def _flank(x, y, w, label):
         ax.add_patch(Rectangle((x, y), w, bar_h, facecolor=flank_color,
                                edgecolor="#888888", linewidth=0.7))
-        ax.text(x + w / 2, y + bar_h / 2, label, ha="center", va="center",
-                fontsize=fontsize - 2, style="italic", color="#666666")
+        if label:
+            ax.text(x + w / 2, y + bar_h / 2, label,
+                    ha="center", va="center",
+                    fontsize=fontsize - 2, style="italic", color="#666666")
+
+    def _flank_slice(x, y, w):
+        ax.add_patch(Rectangle((x, y), w, bar_h, facecolor=flank_color,
+                               edgecolor="#888888", linewidth=0.5))
 
     def _tile(x, y, w, color, text=None, dashed=False, edge_color=None):
         kw = dict(facecolor=color, edgecolor=edge_color or "#444444",
@@ -1767,44 +1858,55 @@ def plot_compound_layout_schematic(
 
     def _bridge_box(x, y, w, label):
         ax.add_patch(Rectangle((x, y), w, bar_h, facecolor=bridge_color,
-                               edgecolor="#a05a00", linewidth=0.8))
-        ax.text(x + w / 2, y + bar_h / 2, label,
-                ha="center", va="center",
-                fontsize=fontsize - 2, fontweight="bold", color="#7a3a00")
-
-    block1_panel_w = ref_n1 * tile_w
-    block2_panel_w = ref_n2 * tile_w
+                               edgecolor=bridge_edge, linewidth=0.8))
+        if label:
+            ax.text(x + w / 2, y + bar_h / 2, label,
+                    ha="center", va="center",
+                    fontsize=fontsize - 2, fontweight="bold",
+                    color=bridge_edge)
 
     # Reference row
     _row_label(y_ref, "Reference")
     x0 = 0.0
-    _flank(x0, y_ref, flank_w, "left flank A")
+    _flank(x0, y_ref, flank_w, "left flank")
     x0 += flank_w
     for i in range(ref_n1):
         _tile(x0 + i * tile_w, y_ref, tile_w, motif_color_1, disp1)
     x0 += block1_panel_w
-    _bridge_box(x0, y_ref, bridge_w, f"M ({bridge_len} bp)")
+    _bridge_box(x0, y_ref, bridge_w, "M")
     x0 += bridge_w
     for i in range(ref_n2):
         _tile(x0 + i * tile_w, y_ref, tile_w, motif_color_2, disp2)
     x0 += block2_panel_w
-    _flank(x0, y_ref, flank_w, "right flank B")
-    x_end = x0 + flank_w
+    _flank(x0, y_ref, flank_w, "right flank")
 
+    # Above-the-line labels for every region, matching NB7's A/Z/B style:
+    # A (left flank, blue, bold), R1, M, R2 (with bridge length), B (right
+    # flank, purple, bold).
     label_y = y_ref + bar_h + 0.18
+    ax.text(flank_w / 2, label_y, "$A$",
+            ha="center", va="bottom",
+            fontsize=fontsize + 1, fontweight="bold", color="#2060a0")
     ax.text(flank_w + block1_panel_w / 2, label_y,
             f"$R_1^{{{ref_n1}}}$", ha="center", va="bottom",
             fontsize=fontsize, color="#1f6090", fontweight="bold")
+    ax.text(flank_w + block1_panel_w + bridge_w / 2, label_y,
+            f"$M$ ({bridge_len} bp)", ha="center", va="bottom",
+            fontsize=fontsize, color=bridge_edge, fontweight="bold")
     ax.text(flank_w + block1_panel_w + bridge_w + block2_panel_w / 2,
             label_y,
             f"$R_2^{{{ref_n2}}}$", ha="center", va="bottom",
             fontsize=fontsize, color="#3a7f1c", fontweight="bold")
+    ax.text(flank_w + block1_panel_w + bridge_w + block2_panel_w + flank_w / 2,
+            label_y, "$B$",
+            ha="center", va="bottom",
+            fontsize=fontsize + 1, fontweight="bold", color="#7030a0")
 
     # NW-flex row
     if show_nwflex:
         _row_label(y_nwf, "NW-flex ref")
         x0 = 0.0
-        _flank(x0, y_nwf, flank_w, "left flank A")
+        _flank(x0, y_nwf, flank_w, "left flank")
         x0 += flank_w
         n1e = nwflex_factor * ref_n1
         n2e = nwflex_factor * ref_n2
@@ -1820,7 +1922,7 @@ def plot_compound_layout_schematic(
             _tile(x0 + i * t2e, y_nwf, t2e, nwflex_color_2,
                   dashed=True, edge_color=nwflex_edge_2)
         x0 += block2_panel_w
-        _flank(x0, y_nwf, flank_w, "right flank B")
+        _flank(x0, y_nwf, flank_w, "right flank")
 
         ax.text(flank_w + block1_panel_w / 2, y_nwf + bar_h + 0.18,
                 f"$R_1^{{{n1e}}}$", ha="center", va="bottom",
@@ -1839,7 +1941,7 @@ def plot_compound_layout_schematic(
         bar_h, facecolor="none", edgecolor="#888888", linewidth=0.7,
         zorder=2,
     ))
-    _flank(x0, y_hap, flank_w, "left flank A")
+    _flank(x0, y_hap, flank_w, "left flank")
     x0 += flank_w
     if n1_hap > 0:
         if delta1_example > 0:
@@ -1867,7 +1969,7 @@ def plot_compound_layout_schematic(
             for i in range(n2_hap):
                 _tile(x0 + i * t2, y_hap, t2, motif_color_2, disp2)
     x0 += block2_panel_w
-    _flank(x0, y_hap, flank_w, "right flank B")
+    _flank(x0, y_hap, flank_w, "right flank")
 
     if delta1_example != 0:
         cx = flank_w + block1_panel_w / 2
@@ -1892,15 +1994,82 @@ def plot_compound_layout_schematic(
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
 
-    ax.set_xlim(-1.5, x_end + 0.5)
-    ax.set_ylim(-0.4, y_ref + bar_h + 0.9)
+    # --- Read stack -----------------------------------------------------
+    stack_center = (read_ys[0] + read_ys[-1]) / 2
+    _row_label(stack_center, "Reads")
+
+    for k in range(n_reads):
+        yk = read_ys[k]
+        lflank_ex = read_lflanks[k]
+        rflank_ex = read_rflanks[k]
+        rx0 = flank_w - lflank_ex
+        _flank_slice(rx0, yk, lflank_ex)
+        # Block 1 tiles (no in-tile text — labeled on Hap above).
+        x0 = flank_w
+        if n1_hap > 0:
+            if delta1_example > 0:
+                t1 = block1_panel_w / n1_hap
+                for i in range(ref_n1):
+                    _tile(x0 + i * t1, yk, t1, motif_color_1)
+                for i in range(ref_n1, n1_hap):
+                    _tile(x0 + i * t1, yk, t1, extra_color)
+            else:
+                t1 = tile_w
+                for i in range(n1_hap):
+                    _tile(x0 + i * t1, yk, t1, motif_color_1)
+        x0 += block1_panel_w
+        _bridge_box(x0, yk, bridge_w, label=None)
+        x0 += bridge_w
+        if n2_hap > 0:
+            if delta2_example > 0:
+                t2 = block2_panel_w / n2_hap
+                for i in range(ref_n2):
+                    _tile(x0 + i * t2, yk, t2, motif_color_2)
+                for i in range(ref_n2, n2_hap):
+                    _tile(x0 + i * t2, yk, t2, extra_color)
+            else:
+                t2 = tile_w
+                for i in range(n2_hap):
+                    _tile(x0 + i * t2, yk, t2, motif_color_2)
+        x0 += block2_panel_w
+        _flank_slice(x0, yk, rflank_ex)
+        rx1 = x0 + rflank_ex
+        ax.add_patch(FancyBboxPatch(
+            (rx0, yk), rx1 - rx0, bar_h,
+            boxstyle="round,pad=0.02,rounding_size=0.18",
+            facecolor="none", edgecolor=read_outline, linewidth=1.1,
+            zorder=3,
+        ))
+
+    # lflank extent bracket on the topmost read (heaviest lflank).
+    top_y = read_ys[-1]
+    top_lflank = read_lflanks[-1]
+    arrow_y = top_y + bar_h + 0.15
+    text_y  = top_y + bar_h + 0.30
+    ax.annotate(
+        "", xy=(flank_w - top_lflank, arrow_y),
+        xytext=(flank_w, arrow_y),
+        arrowprops=dict(arrowstyle="<->", color=read_outline, lw=1.4),
+    )
+    ax.text(flank_w - top_lflank / 2, text_y,
+            "lflank extent",
+            ha="center", va="bottom",
+            fontsize=fontsize - 1, color=read_outline, fontweight="bold")
+
+    # Frame.  Both modes extend the low-x side by 4.5 units for the
+    # non-mirror row labels; mirror extends the high-x side by 5.0 for
+    # the row labels after invert.
+    if mirror:
+        ax.set_xlim(-4.5, x_end + 5.0)
+        ax.invert_xaxis()
+    else:
+        ax.set_xlim(-4.5, x_end + 0.5)
+    ax.set_ylim(-0.4, y_ref + bar_h + 1.1)
     ax.set_aspect("auto")
     ax.set_xticks([])
     ax.set_yticks([])
     for spine in ax.spines.values():
         spine.set_visible(False)
-    if mirror:
-        ax.invert_xaxis()
 
     title_size = fontsize + 3
     label_size = fontsize + 1
@@ -1922,3 +2091,4 @@ def plot_compound_layout_schematic(
                     ha="center", va="bottom",
                     fontsize=label_size - 1, style="italic", color="#444444")
     return fig
+
