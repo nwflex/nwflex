@@ -41,6 +41,13 @@ Pipfile.lock
 .mypy_cache/
 .dmypy.json
 
+# pytest / coverage artifacts
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
 # Pyre type checker
 .pyre/
 
