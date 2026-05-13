@@ -62,3 +62,14 @@ Thumbs.db
 # pdfs from notebooks
 notebooks/pdfs
 
+# Batch sweep outputs — most artifacts are regenerable from
+# scripts/run_batch_sweep.py + scripts/aggregate_results.py +
+# scripts/build_stats_tables.py + scripts/build_lego_playground.py.
+# Only the tidy aggregate CSVs (supplement/data/*.csv) and the LaTeX/CSV
+# stats tables (supplement/tables/) are tracked — those are small and
+# get cited from the paper supplement.
+supplement/data/single_repeat/
+supplement/data/compound/
+supplement/figures/
+supplement/lego_playground.html
+
