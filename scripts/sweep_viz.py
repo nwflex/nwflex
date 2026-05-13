@@ -187,9 +187,15 @@ def plot_proportion_heatmap_rows(
     suptitle: str | None = None,
     subtitle: str | None = None,
     cbar_label: str = "fraction of reads with score = truth",
+    cell_value_fn=_proportion_value_fn_1d,
 ):
     """Multi-row variant of :func:`plot_proportion_heatmap`.  ``rows``
-    is a list of ``(key, df_subset)`` pairs."""
+    is a list of ``(key, df_subset)`` pairs.
+
+    ``cell_value_fn`` defaults to the per-locus state-counting function,
+    matching the original cross-locus behavior.  Pass a custom function
+    to plot pre-aggregated fractions directly (one row per cell with
+    ``frac_fwd`` / ``frac_rc`` columns)."""
     import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
@@ -229,7 +235,7 @@ def plot_proportion_heatmap_rows(
             _draw_1d_grid_panel(
                 ax, df[df["arm"] == arm],
                 deltas=deltas, lflanks=lflanks,
-                cell_value_fn=_proportion_value_fn_1d,
+                cell_value_fn=cell_value_fn,
                 color_fn=color_of, fontsize=fontsize,
             )
             if r == 0:

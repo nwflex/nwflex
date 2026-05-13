@@ -1,0 +1,50 @@
+# Slim compound sweep — transposed motif-length pairs.
+#
+# Companion to slim.yaml.  slim.yaml runs the upper triangle
+# {(1,1),(1,2),(1,3),(2,2),(2,3),(3,3)}; this config fills in the
+# strict-lower-triangle pairs {(2,1),(3,1),(3,2)} so the motif-length
+# pair stack figure can show whether order-of-motifs matters
+# (R1 sits left of R2 in the compound reference).
+#
+# Same parameters as slim.yaml otherwise.  Writes to the same
+# supplement/data/compound/ tree so re-running aggregate_results picks
+# up both halves automatically.
+#
+# Total: 3 length pairs * 20 pairs each * 2 N-pairs * 3 bridges = 360 tasks.
+# Expected wall ~5 min on 56 workers.
+#
+# Usage:
+#   python scripts/run_batch_sweep.py --config scripts/configs/slim_transposed.yaml --workers 56
+
+seed: 20260513
+
+panel: data/hg38_motif_sample_K100.tsv
+
+single_repeat:
+  motif_lengths: []
+  loci_per_length: 0
+  N_values: []
+  delta_range: [-5, 5]
+  snv_positions: [null]
+  read_len: 150
+  k_min_flank: 1
+
+compound:
+  motif_length_pairs:
+    - [2, 1]
+    - [3, 1]
+    - [3, 2]
+  pairs_per_length_pair: 20
+  N_pairs:
+    - [10, 10]
+    - [5, 15]
+  bridge_lengths: [1, 3, 5]
+  delta1_range: [-5, 5]
+  delta2_range: [-5, 5]
+  read_len: 150
+  k_min_flank: 1
+
+output:
+  data_dir: supplement/data
+  figures_dir: supplement/figures
+  tables_dir: supplement/tables

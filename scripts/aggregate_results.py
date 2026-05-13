@@ -80,6 +80,16 @@ _ARM_TITLES = {
 }
 
 
+# Manuscript-priority figure names (without extension).  After the full
+# aggregate run writes every figure to ``figures_dir``, these are
+# duplicated into the sibling ``<figures_dir>_priority`` folder so they
+# are easy to find amongst the ~60 alternative stratifications.
+_PRIORITY_FIGURE_NAMES = [
+    "compound__all_loci__bridge_stack",
+    "compound__N10_10__M3__motifLpair_stack",
+]
+
+
 def _compound_proportion_per_npair(
     df: pd.DataFrame, figures_dir: Path,
 ) -> None:
@@ -110,14 +120,15 @@ def _compound_proportion_per_npair(
 def _compound_proportion_all_loci(
     df: pd.DataFrame, figures_dir: Path,
 ) -> None:
-    """Single bridge-stacked heatmap pooling every (motif pair, N-pair)
-    locus as one observation per cell.  Each cell's proportion is the
-    fraction of those observations whose chosen alignment has
-    ``state ∈ {P, T}``."""
+    """Bridge-stacked heatmap pooling every motif pair at the symmetric
+    N-pairs (``N1 == N2``); asymmetric N-pair loci are excluded so the
+    pooled view does not commingle two distinct count regimes."""
+    df = df[df["N1"] == df["N2"]]
+    if df.empty:
+        return
     bridge_lengths = sorted(df["bridge_len"].unique())
     deltas1 = sorted(df["delta1"].unique())
     deltas2 = sorted(df["delta2"].unique())
-    # Count "loci" as (pind1, pind2, N1, N2) tuples for the caption.
     n_loci = df[["pind1", "pind2", "N1", "N2"]].drop_duplicates().shape[0]
     fig = plot_proportion_heatmap_2d_rows(
         df,
@@ -125,7 +136,8 @@ def _compound_proportion_all_loci(
         row_values=bridge_lengths, row_col="bridge_len",
         arm_titles=_ARM_TITLES,
         row_label_fn=lambda m: f"|M| = {m} bp",
-        suptitle="Compound cross-locus fraction with score = truth — all loci",
+        suptitle=("Compound cross-locus fraction with score = truth — "
+                  "symmetric N-pairs"),
         subtitle=f"each cell aggregates {n_loci} (motif pair × N-pair) loci",
         cbar_label="fraction of loci with score = truth",
     )
@@ -168,7 +180,10 @@ def _single_repeat_proportion_snv_stack(
     deltas  = sorted(df["delta"].unique())
     lflanks = sorted(df["lflank"].unique())
     for N, sub_n in df.groupby("N"):
-        offsets = sorted(sub_n["snv_offset"].unique())
+        present = sub_n["snv_offset"].unique()
+        offsets = sorted([o for o in present if o != -1])
+        if -1 in present:
+            offsets = offsets + [-1]
         rows = [(off, sub_n[sub_n["snv_offset"] == off]) for off in offsets]
         n_loci = sub_n["pind"].nunique()
 
@@ -393,6 +408,24 @@ def main() -> None:
         _compound_tidy_aggregate(cmp_df, data_dir)
     if sr_df is not None:
         _single_repeat_tidy_aggregate(sr_df, data_dir)
+
+    priority_dir = figures_dir.parent / (figures_dir.name + "_priority")
+    _copy_priority_figures(figures_dir, priority_dir)
+
+
+def _copy_priority_figures(
+    figures_dir: Path, priority_dir: Path,
+) -> None:
+    import shutil
+    priority_dir.mkdir(parents=True, exist_ok=True)
+    n = 0
+    for name in _PRIORITY_FIGURE_NAMES:
+        for ext in ("png", "pdf"):
+            src = figures_dir / f"{name}.{ext}"
+            if src.exists():
+                shutil.copy2(src, priority_dir / src.name)
+                n += 1
+    print(f"\nCopied {n} priority files to {priority_dir}")
 
 
 if __name__ == "__main__":
