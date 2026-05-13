@@ -11,6 +11,7 @@ from nwflex.repeats import STRLocus
 from nwflex.simulation import (
     BwaBothStrandsResult,
     BwaResult,
+    CompoundLocus,
     Haplotype,
     NwflexResult,
     Read,
@@ -18,15 +19,22 @@ from nwflex.simulation import (
     align_bwa,
     align_bwa_both_strands,
     align_nwflex,
+    alignment_state_multi,
+    build_compound_haplotype,
+    build_compound_mirror_frame,
     build_haplotype,
     build_locus_from_panel,
     build_mirror_frame,
+    bwa_compound_truth_cigar,
+    bwa_truth_cigar,
     clean_flank_window,
     decode_z_bp,
     flank_bases_consumed,
     is_arm_correct,
     is_arm_correct_multi,
     mirror_reads,
+    nwflex_compound_truth_cigar,
+    nwflex_truth_cigar,
     parse_cigar,
     pivot_for_heatmap,
     plot_correctness_heatmap,
@@ -976,6 +984,387 @@ class TestIsArmCorrectMulti:
         )
         assert per_block == [True, True]
         assert not ok
+
+
+# ---------------------------------------------------------------------------
+# bwa_truth_cigar / nwflex_truth_cigar — single-locus truth alignment
+# ---------------------------------------------------------------------------
+#
+# Reference layout used by these tests:
+#
+#     pos 0..3   left flank   "GGGG"
+#     pos 4..13  repeat zone  (R="AC", N=5)  → "ACACACACAC"  (10 bp)
+#     pos 14..17 right flank  "TTTT"
+#
+# locus.s = 4, locus.e = 14, locus.k = 2, body_ref = k*N = 10.
+# A read with lflank_extent=L, rflank_extent=Rf has 1-based start
+# pos = (locus.s - L) + 1 in both builders.
+
+_SINGLE_LOCUS = STRLocus(A="GGGG", R="AC", N=5, B="TTTT")
+
+
+def _read_for_locus(locus, hap, *, lflank_extent, rflank_extent):
+    """Construct a Read whose body is the haplotype's full body plus the
+    requested flank extents. The actual sequence content doesn't matter for
+    the truth-CIGAR shape; only the extents do."""
+    start = locus.s - lflank_extent  # 0-based in the haplotype (same flank len)
+    length = lflank_extent + hap.body_len + rflank_extent
+    seq = hap.sequence[start:start + length]
+    return Read(
+        sequence=seq,
+        var_start=start,
+        lflank_extent=lflank_extent,
+        rflank_extent=rflank_extent,
+    )
+
+
+class TestBwaTruthCigar:
+    """bwa_truth_cigar — natural alignment shape with a single I/D at the
+    lflank-zone boundary covering the Δ·|R| body-length difference."""
+
+    def test_delta_zero_is_single_M_run(self):
+        # Δ=0, full-coverage read: body_hap = body_ref = 10.
+        # Expected: pos = (4 - 4) + 1 = 1; cigar = "{L + body + Rf}M" = "18M".
+        hap = build_haplotype(_SINGLE_LOCUS, delta=0)
+        read = _read_for_locus(_SINGLE_LOCUS, hap, lflank_extent=4, rflank_extent=4)
+        pos, cigar = bwa_truth_cigar(read, hap, _SINGLE_LOCUS)
+        assert (pos, cigar) == (1, "18M")
+
+    def test_positive_delta_inserts_at_boundary(self):
+        # Δ=+2 → body_hap = 14, body_ref = 10. Excess 4 bp inserted at the
+        # lflank-zone boundary: "{L}M{Δ·k}I{body_ref + Rf}M".
+        hap = build_haplotype(_SINGLE_LOCUS, delta=2)
+        read = _read_for_locus(_SINGLE_LOCUS, hap, lflank_extent=4, rflank_extent=4)
+        pos, cigar = bwa_truth_cigar(read, hap, _SINGLE_LOCUS)
+        assert (pos, cigar) == (1, "4M4I14M")
+
+    def test_negative_delta_deletes_at_boundary(self):
+        # Δ=-2 → body_hap = 6, body_ref = 10. Missing 4 bp deleted at the
+        # boundary: "{L}M{-Δ·k}D{body_hap + Rf}M".
+        hap = build_haplotype(_SINGLE_LOCUS, delta=-2)
+        read = _read_for_locus(_SINGLE_LOCUS, hap, lflank_extent=4, rflank_extent=4)
+        pos, cigar = bwa_truth_cigar(read, hap, _SINGLE_LOCUS)
+        assert (pos, cigar) == (1, "4M4D10M")
+
+    def test_partial_flank_extents_shift_start(self):
+        # L=2, Rf=3, Δ=0: pos shifts to (4 - 2) + 1 = 3; cigar = "{L+body+Rf}M".
+        hap = build_haplotype(_SINGLE_LOCUS, delta=0)
+        read = _read_for_locus(_SINGLE_LOCUS, hap, lflank_extent=2, rflank_extent=3)
+        pos, cigar = bwa_truth_cigar(read, hap, _SINGLE_LOCUS)
+        assert (pos, cigar) == (3, "15M")
+
+
+class TestNwflexTruthCigar:
+    """nwflex_truth_cigar — same shape but with a free N skip over unused
+    motifs in the 3N-extended reference."""
+
+    # Extended reference: same flanks, N=15 (3·5), so body_ref_ext = 30.
+    EXT_LOCUS = STRLocus(A="GGGG", R="AC", N=15, B="TTTT")
+
+    def test_delta_zero_emits_skip_for_unused_motifs(self):
+        # body_hap = 10, body_ref_ext = 30, skip = 20.
+        # Expected: "{L}M{skip}N{body_hap + Rf}M" = "4M20N14M".
+        hap = build_haplotype(_SINGLE_LOCUS, delta=0)
+        read = _read_for_locus(_SINGLE_LOCUS, hap, lflank_extent=4, rflank_extent=4)
+        pos, cigar = nwflex_truth_cigar(read, hap, self.EXT_LOCUS)
+        assert (pos, cigar) == (1, "4M20N14M")
+
+    def test_skip_equal_zero_collapses_to_single_M_run(self):
+        # When body_hap exactly fills body_ref_ext, skip = 0 and the truth
+        # collapses to a single M run.
+        # Use an extended locus with N=5 so body_ref_ext = 10 = body_hap.
+        ext = STRLocus(A="GGGG", R="AC", N=5, B="TTTT")
+        hap = build_haplotype(_SINGLE_LOCUS, delta=0)
+        read = _read_for_locus(_SINGLE_LOCUS, hap, lflank_extent=4, rflank_extent=4)
+        pos, cigar = nwflex_truth_cigar(read, hap, ext)
+        assert (pos, cigar) == (1, "18M")
+
+    def test_hap_body_exceeds_ext_ref_body_raises(self):
+        # body_hap = 20 > body_ref_ext = 10 with the un-extended locus
+        # standing in for the "ext" reference.
+        hap = build_haplotype(_SINGLE_LOCUS, delta=5)
+        read = _read_for_locus(_SINGLE_LOCUS, hap, lflank_extent=4, rflank_extent=4)
+        with pytest.raises(ValueError, match="exceeds NW-flex"):
+            nwflex_truth_cigar(read, hap, _SINGLE_LOCUS)
+
+
+# ---------------------------------------------------------------------------
+# CompoundLocus and compound-haplotype construction
+# ---------------------------------------------------------------------------
+#
+# Reference layout used by these tests (k1=2, k2=3):
+#
+#     pos 0..3    A         "GGGG"
+#     pos 4..9    R1^3      "ACACAC"        (k1·N1 = 6 bp)
+#     pos 10..11  M         "TT"            (bridge, |M| = 2)
+#     pos 12..17  R2^2      "GTAGTA"        (k2·N2 = 6 bp)
+#     pos 18..21  B         "CCCC"
+#
+# s1=4, e1=10, s2=12, e2=18; total length 22.
+# Extended (factor=3): N1_ext=9 (18 bp), N2_ext=6 (18 bp); zones_ext
+# s1=4, e1=22, s2=24, e2=42; total length 46.
+
+_COMPOUND = CompoundLocus(
+    A="GGGG", R1="AC", N1=3,
+    M="TT",
+    R2="GTA", N2=2, B="CCCC",
+    nwflex_factor=3,
+)
+
+
+class TestCompoundLocus:
+    """CompoundLocus property invariants."""
+
+    def test_zones_match_motif_geometry(self):
+        # s1 = |A|, e1 = s1 + k1·N1, s2 = e1 + |M|, e2 = s2 + k2·N2.
+        assert _COMPOUND.s1 == 4
+        assert _COMPOUND.e1 == 10
+        assert _COMPOUND.s2 == 12
+        assert _COMPOUND.e2 == 18
+        assert _COMPOUND.zones == [(4, 10), (12, 18)]
+
+    def test_assembled_reference_X_matches_layout(self):
+        assert _COMPOUND.X == "GGGG" + "AC" * 3 + "TT" + "GTA" * 2 + "CCCC"
+        assert len(_COMPOUND.X) == 22
+
+    def test_extended_reference_repeats_blocks_by_nwflex_factor(self):
+        # Each repeat block expands to f·N copies; flanks and bridge unchanged.
+        assert _COMPOUND.X_ext == (
+            "GGGG" + "AC" * 9 + "TT" + "GTA" * 6 + "CCCC"
+        )
+        assert _COMPOUND.zones_ext == [(4, 22), (24, 42)]
+
+
+class TestBuildCompoundHaplotype:
+    """build_compound_haplotype — perturb both block counts independently."""
+
+    def test_zero_deltas_match_locus_reference(self):
+        hap = build_compound_haplotype(_COMPOUND, delta1=0, delta2=0)
+        assert hap.sequence == _COMPOUND.X
+        assert hap.body_lens == (6, 6)
+        assert hap.body_len == 6 + 2 + 6  # body1 + |M| + body2
+        assert hap.flank_len == 4
+        assert (hap.delta1, hap.delta2) == (0, 0)
+
+    def test_positive_delta_extends_only_named_block(self):
+        # Δ1=+1 adds one R1 motif; Δ2 stays 0.
+        hap = build_compound_haplotype(_COMPOUND, delta1=1, delta2=0)
+        assert hap.sequence == "GGGG" + "AC" * 4 + "TT" + "GTA" * 2 + "CCCC"
+        assert hap.body_lens == (8, 6)
+
+    def test_negative_delta_shortens_only_named_block(self):
+        # Δ2=-1 drops one R2 motif.
+        hap = build_compound_haplotype(_COMPOUND, delta1=0, delta2=-1)
+        assert hap.sequence == "GGGG" + "AC" * 3 + "TT" + "GTA" * 1 + "CCCC"
+        assert hap.body_lens == (6, 3)
+
+    def test_negative_count_below_zero_raises(self):
+        # delta2 = -3 → N2 + delta2 = -1.
+        with pytest.raises(ValueError, match="counts must be >= 0"):
+            build_compound_haplotype(_COMPOUND, delta1=0, delta2=-3)
+
+    def test_snv_replaces_byte_at_abs_pos(self):
+        # Inject a single-base substitution in the left flank.
+        hap = build_compound_haplotype(
+            _COMPOUND, delta1=0, delta2=0, snv=(1, "T"),
+        )
+        assert hap.sequence[1] == "T"
+        assert hap.snv_pos == 1
+        assert hap.snv_base == "T"
+
+    def test_snv_out_of_range_raises(self):
+        with pytest.raises(ValueError, match="out of range"):
+            build_compound_haplotype(
+                _COMPOUND, delta1=0, delta2=0, snv=(999, "T"),
+            )
+
+
+class TestBuildCompoundMirrorFrame:
+    """build_compound_mirror_frame — reverse-complement the BWA and ext refs,
+    the reads, and both pairs of zones in lock-step."""
+
+    def _read_pair(self):
+        # A 10 bp read centered on block 1; specifics don't matter for the
+        # mirror-frame shape, only the extents.
+        return [
+            Read(sequence="ACACACACAC", var_start=2,
+                 lflank_extent=2, rflank_extent=2),
+        ]
+
+    def test_references_are_reverse_complemented(self):
+        rc_X, rc_X_ext, rc_reads, rc_zones, rc_zones_ext = (
+            build_compound_mirror_frame(_COMPOUND, self._read_pair())
+        )
+        assert rc_X == reverse_complement(_COMPOUND.X)
+        assert rc_X_ext == reverse_complement(_COMPOUND.X_ext)
+        assert len(rc_reads) == 1
+
+    def test_zone_index_order_preserved_in_mirror(self):
+        # rc_zones[i] is the rc of forward zones[i], i.e. blocks keep their
+        # logical [block1, block2] ordering across frames even though their
+        # absolute ref addresses flip.
+        _, _, _, rc_zones, rc_zones_ext = build_compound_mirror_frame(
+            _COMPOUND, self._read_pair(),
+        )
+        n = len(_COMPOUND.X)
+        assert rc_zones == [(n - 10, n - 4), (n - 18, n - 12)]
+        n_ext = len(_COMPOUND.X_ext)
+        assert rc_zones_ext == [(n_ext - 22, n_ext - 4),
+                                (n_ext - 42, n_ext - 24)]
+
+
+# ---------------------------------------------------------------------------
+# bwa_compound_truth_cigar / nwflex_compound_truth_cigar
+# ---------------------------------------------------------------------------
+#
+# Uses the same _COMPOUND fixture. For a read with extents (L, Rf):
+# bwa truth pos = (s1 - L) + 1; nwflex truth pos = (zones_ext[0][0] - L) + 1.
+
+class TestBwaCompoundTruthCigar:
+    """bwa_compound_truth_cigar — I/D at the LEFT edge of each block."""
+
+    def _compound_read(self, L, Rf, hap):
+        return Read(
+            sequence=hap.sequence[(_COMPOUND.s1 - L):
+                                  (_COMPOUND.s1 - L) + (L + hap.body_len + Rf)],
+            var_start=_COMPOUND.s1 - L,
+            lflank_extent=L,
+            rflank_extent=Rf,
+        )
+
+    def test_zero_deltas_collapse_to_single_M_run(self):
+        # No insertions / deletions; adjacent M ops merged: 4M 6M 2M 6M 4M → 22M.
+        hap = build_compound_haplotype(_COMPOUND, delta1=0, delta2=0)
+        read = self._compound_read(4, 4, hap)
+        pos, cigar = bwa_compound_truth_cigar(read, hap, _COMPOUND)
+        assert (pos, cigar) == (1, "22M")
+
+    def test_positive_delta_block1_inserts_at_block1_left_edge(self):
+        # Δ1=+2 (k1=2 → 4 inserted bases) at block1 left edge.
+        # Shape: L M | Δ·k1 I | N1·k1 M | bridge M | N2·k2 M | Rf M
+        # = 4M | 4I | 6M | 2M | 6M | 4M  →  4M4I18M after merging.
+        hap = build_compound_haplotype(_COMPOUND, delta1=2, delta2=0)
+        read = self._compound_read(4, 4, hap)
+        pos, cigar = bwa_compound_truth_cigar(read, hap, _COMPOUND)
+        assert (pos, cigar) == (1, "4M4I18M")
+
+    def test_negative_delta_block2_deletes_at_block2_left_edge(self):
+        # Δ2=-1 (k2=3 → 3 deleted ref bases) at block2 left edge.
+        # Shape: 4M | 6M | 2M | 3D | 3M | 4M  →  12M3D7M.
+        hap = build_compound_haplotype(_COMPOUND, delta1=0, delta2=-1)
+        read = self._compound_read(4, 4, hap)
+        pos, cigar = bwa_compound_truth_cigar(read, hap, _COMPOUND)
+        assert (pos, cigar) == (1, "12M3D7M")
+
+    def test_both_blocks_perturbed_keeps_per_block_indels(self):
+        # Δ1=+1 inserts k1=2 bases at block1; Δ2=-1 deletes k2=3 at block2.
+        # 4M | 2I | 6M | 2M | 3D | 3M | 4M  →  4M2I8M3D7M.
+        hap = build_compound_haplotype(_COMPOUND, delta1=1, delta2=-1)
+        read = self._compound_read(4, 4, hap)
+        pos, cigar = bwa_compound_truth_cigar(read, hap, _COMPOUND)
+        assert (pos, cigar) == (1, "4M2I8M3D7M")
+
+
+class TestNwflexCompoundTruthCigar:
+    """nwflex_compound_truth_cigar — free N skip over unused motifs at each
+    block's left edge, against the extended (f·N1, f·N2) reference."""
+
+    def _compound_read(self, L, Rf, hap):
+        return Read(
+            sequence=hap.sequence[(_COMPOUND.s1 - L):
+                                  (_COMPOUND.s1 - L) + (L + hap.body_len + Rf)],
+            var_start=_COMPOUND.s1 - L,
+            lflank_extent=L,
+            rflank_extent=Rf,
+        )
+
+    def test_zero_deltas_emit_skips_for_unused_motifs(self):
+        # f=3, N1=3 → f·N1=9, body_ref1_ext=18; (N1+Δ1)=3, body_hap1=6;
+        # skip1 = 18 - 6 = 12. Similarly skip2 = 18 - 6 = 12.
+        # Position: (zones_ext[0][0] - L) + 1 = (4 - 4) + 1 = 1.
+        # Shape: 4M | 12N | 6M | 2M | 12N | 6M | 4M  →  4M12N8M12N10M.
+        hap = build_compound_haplotype(_COMPOUND, delta1=0, delta2=0)
+        read = self._compound_read(4, 4, hap)
+        pos, cigar = nwflex_compound_truth_cigar(read, hap, _COMPOUND)
+        assert (pos, cigar) == (1, "4M12N8M12N10M")
+
+    def test_positive_delta_shrinks_corresponding_skip(self):
+        # Δ1=+1 → body_hap1=8, skip1 = 18 - 8 = 10. skip2 unchanged at 12.
+        # Shape: 4M | 10N | 8M | 2M | 12N | 6M | 4M  →  4M10N10M12N10M.
+        hap = build_compound_haplotype(_COMPOUND, delta1=1, delta2=0)
+        read = self._compound_read(4, 4, hap)
+        pos, cigar = nwflex_compound_truth_cigar(read, hap, _COMPOUND)
+        assert (pos, cigar) == (1, "4M10N10M12N10M")
+
+    def test_hap_count_exceeds_extended_ref_raises(self):
+        # With nwflex_factor=3 and N1=3, f·N1=9. Δ1=+7 → 10 > 9. Must raise.
+        big = CompoundLocus(
+            A="GGGG", R1="AC", N1=3, M="TT",
+            R2="GTA", N2=2, B="CCCC", nwflex_factor=3,
+        )
+        hap = build_compound_haplotype(big, delta1=7, delta2=0)
+        read = Read(
+            sequence=hap.sequence,
+            var_start=0, lflank_extent=4, rflank_extent=4,
+        )
+        with pytest.raises(ValueError, match="extended ref"):
+            nwflex_compound_truth_cigar(read, hap, big)
+
+
+# ---------------------------------------------------------------------------
+# alignment_state_multi — verdict P / T / M / D for compound alignments
+# ---------------------------------------------------------------------------
+
+class TestAlignmentStateMulti:
+    """alignment_state_multi classifies a chosen compound alignment against
+    the truth on two axes: length-correctness (per-block z-bp + outer span)
+    and chosen-vs-truth NW score."""
+
+    ZONES = [(4, 10), (12, 18)]
+    TRUTH_BPS = [6, 6]  # body per block on the Δ=0 haplotype
+
+    def test_correct_alignment_classifies_as_P(self):
+        # 22M starting at pos 1: spans both zones; z-bp inside each zone = 6.
+        state = alignment_state_multi(
+            "22M", 1, chosen_score=100.0, truth_score=100.0,
+            ref_zones=self.ZONES, truth_z_bps=self.TRUTH_BPS,
+            convention="bwa",
+        )
+        assert state == "P"
+
+    def test_wrong_length_with_equal_score_classifies_as_T(self):
+        # Wrong z-bp in block1 (4 instead of 6) but score equals truth →
+        # tie-break landed elsewhere.
+        state = alignment_state_multi(
+            "4M2D4M2M6M4M", 1, chosen_score=100.0, truth_score=100.0,
+            ref_zones=self.ZONES, truth_z_bps=self.TRUTH_BPS,
+            convention="bwa",
+        )
+        assert state == "T"
+
+    def test_wrong_length_with_lower_score_classifies_as_M(self):
+        state = alignment_state_multi(
+            "4M2D4M2M6M4M", 1, chosen_score=80.0, truth_score=100.0,
+            ref_zones=self.ZONES, truth_z_bps=self.TRUTH_BPS,
+            convention="bwa",
+        )
+        assert state == "M"
+
+    def test_wrong_length_with_higher_score_classifies_as_D(self):
+        state = alignment_state_multi(
+            "4M2D4M2M6M4M", 1, chosen_score=120.0, truth_score=100.0,
+            ref_zones=self.ZONES, truth_z_bps=self.TRUTH_BPS,
+            convention="bwa",
+        )
+        assert state == "D"
+
+    def test_unmapped_classifies_as_D(self):
+        state = alignment_state_multi(
+            None, None, chosen_score=None, truth_score=100.0,
+            ref_zones=self.ZONES, truth_z_bps=self.TRUTH_BPS,
+            convention="bwa",
+        )
+        assert state == "D"
 
 
 # ---------------------------------------------------------------------------

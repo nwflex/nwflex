@@ -118,12 +118,37 @@ lands. Two practical rules to keep the merge clean:
       set since jump-report order is implementation-defined.
 - [x] Document the hand-trace-first principle and the "what breaks
       if removed" convention in `tests/DOMAIN_GUIDE.md`.
+- [x] Wire `pytest --cov=nwflex` and record a baseline. Initial
+      overall coverage was 36%; algorithm core well-covered, gaps
+      concentrated in `simulation/sweep.py` (38%) and
+      `simulation/viz.py` (24%).
 - [ ] Audit each agent-drafted test file and classify assertions as
       *domain-anchored*, *implementation-anchored*, or *trivial*.
-- [ ] Rewrite implementation-anchored assertions against the
-      invariants listed above.
-- [ ] Add the missing edge cases.
-- [ ] Wire `pytest --cov=nwflex` and record a baseline.
-- [ ] Close coverage gaps where the missing path encodes a guarantee.
+      *Progress:* `test_trf.py` and `test_simulation.py` audited;
+      remaining: `test_aligners.py`, `test_buffered.py`,
+      `test_default.py`, `test_fast_path.py`, `test_path_helpers.py`.
+- [x] Fix `test_trf.py` fixture rot from `e810749` (renamed
+      `chr21_snippet.dat` → `chr21_snippet_demo.dat`); re-anchored
+      row-index lookups to coordinate-based ones; replaced
+      hardcoded column count with a named-set check; added a
+      `consensus_pattern` length / `consensus_size` schema
+      invariant; documented `test_overlapping_repeat_has_higher_coverage`
+      with the "what breaks if removed" convention.
+- [x] Close the `simulation/core.py` coverage gap (68% → 94%) by
+      adding 32 hand-traced tests for `bwa_truth_cigar`,
+      `nwflex_truth_cigar`, `CompoundLocus`, `build_compound_haplotype`,
+      `build_compound_mirror_frame`, `bwa_compound_truth_cigar`,
+      `nwflex_compound_truth_cigar`, and `alignment_state_multi`.
+- [ ] Rewrite any remaining implementation-anchored assertions in
+      the audit-pending modules.
+- [ ] Add the missing edge cases from `DOMAIN_GUIDE.md` (row 0 /
+      column 0 trace pointer, EP stale-value bugs, terminal
+      tie-breaking, etc.).
+- [ ] Close remaining coverage gaps where the missing path encodes
+      a guarantee — primarily the method wrappers in
+      `simulation/sweep.py`.
 - [ ] Update `tests/README.md` to match the rewritten suite, using
-      the "what breaks if removed" column convention.
+      the "what breaks if removed" column convention. *Progress:*
+      `test_str_boundaries.py` already follows the convention;
+      audit-pending flags removed from `test_trf.py` and
+      `test_simulation.py`.

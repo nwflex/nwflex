@@ -38,8 +38,8 @@ breaks if removed" column.
 | `test_default.py` | Scoring preset registry (`PRESETS`, `ScoringPreset`, `align_params`, `make_dna_score_matrix`). **(audit pending)** |
 | `test_fast_path.py` | Unified Cython DP core and `RefAligner` — CIGAR-only return, equivalence with full-result path. **(audit pending)** |
 | `test_path_helpers.py` | Path utilities in `nwflex.fast` — `extract_jumps_from_path`, `path_array_to_list`, `reconstruct_aligned_strings`. **(audit pending)** |
-| `test_simulation.py` | Simulation harness for notebook 07 (NW-flex vs BWA-MEM) — locus/haplotype/read construction, BWA wrappers, mirror frame, verdict helpers. **(audit pending)** |
-| `test_trf.py` | TRF parsing, isolation annotation, and filtering against the `data/chr21_snippet_demo.dat` fixture. **(audit pending)** |
+| `test_simulation.py` | Simulation harness for notebook 07/08 (NW-flex vs BWA-MEM) — locus/haplotype/read construction, BWA wrappers, mirror frame, verdict helpers, single- and compound-locus truth-CIGAR builders, multi-block verdict classifier. |
+| `test_trf.py` | TRF parsing, isolation annotation, and filtering against the `data/chr21_snippet_demo.dat` fixture. |
 
 ---
 
@@ -174,8 +174,6 @@ should:
 - `test_default.py` — Scoring preset registry.
 - `test_fast_path.py` — Unified Cython DP core and `RefAligner`.
 - `test_path_helpers.py` — `nwflex.fast` path utilities.
-- `test_simulation.py` — Notebook-07 simulation harness.
-- `test_trf.py` — TRF parsing and filtering (currently has failures).
 
 ---
 
