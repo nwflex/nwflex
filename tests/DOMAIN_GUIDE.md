@@ -115,6 +115,30 @@ well-formed test inputs never exercise.
 - Mirror-frame symmetry: NW score on `(X, Y)` and on the
   reverse-complement of both should agree.
 
+## Hand-trace-first principle
+
+The strongest discipline for writing tests in this codebase, adapted
+from the testing notes in the sister `nwflex_TNG` repo:
+
+1. Define a minimal concrete scenario — small flanks, small motif,
+   fixed counts.
+2. Trace the algorithm by hand or on paper.
+3. Derive the expected score, CIGAR, jumps, or phase from that trace.
+4. **Only then** write the test, with the hand-derived values as the
+   expected output.
+
+The anti-pattern to avoid: run the code first, see what it returns,
+and assert that. This only proves the implementation is
+self-consistent — it does not protect intended behavior, and it
+silently bakes whatever bug happens to be in the current code into
+the regression suite. Tests written this way pass forever, including
+through regressions.
+
+Numeric snapshots from a run are acceptable **only** when paired
+with an independent recomputation (`score_alignment`, naive
+substring enumeration, mirror-frame symmetry, etc.) that the
+implementation under test does not share code with.
+
 ## How to use this document
 
 When adding or rewriting a test:
@@ -126,11 +150,20 @@ When adding or rewriting a test:
 2. Build the input to *trigger* the boundary regime, not to
    demonstrate the centered well-formed case. The centered case
    belongs in a smoke test; this file is about the rest.
-3. Anchor the assertion to the invariant (a property that must hold
-   for any correct implementation), not to a specific numeric value
-   captured from the current run. Numeric snapshots are acceptable
-   only when paired with an independent recomputation
-   (`score_alignment`, naive baseline, mirror frame, etc.).
+3. Follow the hand-trace-first principle above to derive expected
+   values.
+4. In the test docstring or a comment, state **what breaks if this
+   test is removed** — the concrete bug class the test catches.
+   This forces the author to articulate the test's protective value
+   and gives future maintainers a basis for judging whether the
+   test is still load-bearing.
 
 When a new bug is fixed in `nwflex/`, the fixing commit should add
 both a regression test and an entry here describing the regime.
+
+## Reference implementations
+
+The `tests/test_str_boundaries.py` suite is a worked example of
+these principles. It was ported from `nwflex_TNG` (stress-test
+branch, commit `19f9ad2`) and protects the `e == n` terminal-EP
+family and interrupted-repeat phase semantics.

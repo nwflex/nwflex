@@ -108,6 +108,16 @@ lands. Two practical rules to keep the merge clean:
 
 ## Plan
 
+- [x] Port `tests/test_str_boundaries.py` from `nwflex_TNG`
+      (stress-test branch, commit `19f9ad2`) — 8 tests covering the
+      `e == n` terminal-EP family and interrupted-repeat phase
+      semantics. Two assertions were updated for our codebase:
+      expected CIGAR gained a trailing `1N` after the terminal-
+      contraction CIGAR feature (`fc95192` on `main`), and the
+      Python-vs-fast jump comparison switched from ordered list to
+      set since jump-report order is implementation-defined.
+- [x] Document the hand-trace-first principle and the "what breaks
+      if removed" convention in `tests/DOMAIN_GUIDE.md`.
 - [ ] Audit each agent-drafted test file and classify assertions as
       *domain-anchored*, *implementation-anchored*, or *trivial*.
 - [ ] Rewrite implementation-anchored assertions against the
@@ -115,4 +125,5 @@ lands. Two practical rules to keep the merge clean:
 - [ ] Add the missing edge cases.
 - [ ] Wire `pytest --cov=nwflex` and record a baseline.
 - [ ] Close coverage gaps where the missing path encodes a guarantee.
-- [ ] Update `tests/README.md` to match the rewritten suite.
+- [ ] Update `tests/README.md` to match the rewritten suite, using
+      the "what breaks if removed" column convention.
