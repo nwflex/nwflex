@@ -39,7 +39,7 @@ breaks if removed" column.
 | `test_fast_path.py` | Unified Cython DP core and `RefAligner` — CIGAR-only return, equivalence with full-result path. **(audit pending)** |
 | `test_path_helpers.py` | Path utilities in `nwflex.fast` — `extract_jumps_from_path`, `path_array_to_list`, `reconstruct_aligned_strings`. **(audit pending)** |
 | `test_simulation.py` | Simulation harness for notebook 07 (NW-flex vs BWA-MEM) — locus/haplotype/read construction, BWA wrappers, mirror frame, verdict helpers. **(audit pending)** |
-| `test_trf.py` | TRF parsing, isolation annotation, and filtering against the `data/chr21_snippet.dat` fixture. **(audit pending; currently has failing tests — see `TEST_BRANCH.md`)** |
+| `test_trf.py` | TRF parsing, isolation annotation, and filtering against the `data/chr21_snippet_demo.dat` fixture. **(audit pending)** |
 
 ---
 

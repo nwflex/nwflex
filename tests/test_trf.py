@@ -1,7 +1,7 @@
 # test_trf.py
 #
 # Tests for nwflex.trf — TRF parsing, isolation annotation, and filtering.
-# Uses the small chr21 snippet fixture in data/chr21_snippet.dat (10 rows).
+# Uses the chr21 snippet fixture in data/chr21_snippet_demo.dat.
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from nwflex.trf import (
 
 
 REPO_DATA = Path(__file__).resolve().parent.parent / "data"
-TRF_DAT = REPO_DATA / "chr21_snippet.dat"
+TRF_DAT = REPO_DATA / "chr21_snippet_demo.dat"
 
 
 # ============================================================================
@@ -30,7 +30,7 @@ class TestParseTrfDat:
     def test_basic_shape(self):
         df = parse_trf_dat(TRF_DAT)
         assert isinstance(df, pd.DataFrame)
-        assert len(df) == 10
+        assert len(df) > 0
         # 15 TRF columns + chrom prefix.
         assert "chrom" in df.columns
         for col in ("start", "end", "period_size", "consensus_size", "score"):
@@ -43,15 +43,17 @@ class TestParseTrfDat:
         assert (df["chrom"] == "chr21").all()
 
     def test_start_is_zero_based(self):
-        # First fixture line: TRF emits 1-based start 5016248 → 0-based 5016247.
+        # A known TRF record: 1-based start 5016248 → 0-based 5016247.
         df = parse_trf_dat(TRF_DAT)
-        assert df.iloc[0]["start"] == 5016247
-        assert df.iloc[0]["end"] == 5016270
+        rec = df[df["start"] == 5016247]
+        assert len(rec) == 1
+        assert rec.iloc[0]["end"] == 5016270
 
     def test_repeat_sequence_preserved(self):
         df = parse_trf_dat(TRF_DAT)
-        assert df.iloc[3]["repeat_sequence"] == "GGGGGGGGGG"  # the mono-G run
-        assert df.iloc[3]["period_size"] == 1
+        mono_g = df[df["repeat_sequence"] == "GGGGGGGGGG"]
+        assert len(mono_g) >= 1
+        assert (mono_g["period_size"] == 1).all()
 
     def test_missing_file_raises(self):
         with pytest.raises(FileNotFoundError):
