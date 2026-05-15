@@ -667,9 +667,18 @@ class NwflexResult:
     cigar : str
         CIGAR string for the alignment.
     score : float
-        NW-flex's reported alignment score under the supplied scoring
-        scheme.  Matches ``score_alignment`` on the same CIGAR by
-        construction.
+        NW-flex's reported alignment score: the DP's three-state Gotoh
+        objective at the chosen cell.  The DP charges ``gap_open`` on the
+        M→gap transition and ``gap_extend`` on each subsequent gap step,
+        so a length-L gap costs ``gap_open + (L-1)*gap_extend`` (the
+        "subsumed-open" convention).  Free edges allowed by ``free_X`` /
+        ``free_Y`` are uncharged.  This does NOT match
+        ``score_alignment`` on the same CIGAR in general:
+        ``score_alignment`` charges each I/D/S run as
+        ``gap_open + L*gap_extend`` (stand-alone open, BWA's convention)
+        and always charges S, so the two diverge by one ``gap_extend``
+        per gap run plus the full affine cost of any free-edge ``S``.
+        They agree on gapless CIGARs (M/N only).
     """
     pos: int
     cigar: str
@@ -1045,25 +1054,33 @@ def score_alignment(
 
     This is a strict Needleman-Wunsch global score: every CIGAR op
     contributes, with no edge bonuses or position-dependent
-    adjustments. It matches NW-flex's ``RefAligner.align_simple``
-    score by construction on CIGARs without soft-clip ops (the
-    standard ``free_X = free_Y = False`` configuration used by
-    :func:`align_nwflex`); in semiglobal RefAligner mode, RefAligner
-    emits ``S`` for its free edges and reports a score that does not
-    charge them, while this function does — so the two diverge by the
-    affine-gap cost of those ``S`` runs.  This function **does not**
-    match BWA-MEM's reported SW ``AS:i:`` tag in general — BWA's AS
-    is the local-extension maximum, which can land at an interior
-    cell when the optimal global path dips through an indel.
+    adjustments.  Gap convention is **stand-alone open** (BWA's
+    ``O + k*E``): a gap of length ``L`` costs ``gap_open +
+    L * gap_extend``.  This differs from NW-flex's DP, which uses the
+    "subsumed-open" convention ``gap_open + (L-1) * gap_extend`` (the
+    M→gap transition charges ``gap_open``, each extend charges
+    ``gap_extend``).  The two agree on gapless CIGARs (M/N only) and
+    diverge by one ``gap_extend`` per I/D/S run otherwise.  See
+    ``scripts/check_gap_conventions.py`` and
+    ``nwflex.simulation.sweep._to_dp_convention`` for the bridge.
+
+    Because :func:`align_nwflex` runs the DP semiglobally
+    (``free_X = free_Y = True``), NW-flex hits can carry ``S`` ops at
+    free edges that the DP did not charge; this function **does**
+    charge them, so rescoring such a hit's CIGAR here will differ
+    from ``hit.score`` by the affine-gap cost of those ``S`` runs in
+    addition to any per-gap-run convention offset.  This function
+    also **does not** match BWA-MEM's reported SW ``AS:i:`` tag in
+    general — BWA's AS is the local-extension maximum, which can land
+    at an interior cell when the optimal global path dips through an
+    indel.
 
     Per-base match/mismatch contributions come from ``score_matrix``
-    (indexed via ``alphabet_to_index``).  A gap of length ``L`` costs
-    ``gap_open + L * gap_extend`` (signs as supplied — typically both
-    negative).  ``N`` (skipped reference) is free; ``S`` (soft-clip)
-    is charged the same affine-gap penalty as a deletion of the same
-    length — leading/terminal read bases that don't align should not
-    score better than read bases that do align poorly; ``H`` and ``P``
-    contribute nothing.
+    (indexed via ``alphabet_to_index``).  ``N`` (skipped reference)
+    is free; ``S`` (soft-clip) is charged the same affine-gap penalty
+    as a deletion of the same length — leading/terminal read bases
+    that don't align should not score better than read bases that do
+    align poorly; ``H`` and ``P`` contribute nothing.
 
     Parameters
     ----------

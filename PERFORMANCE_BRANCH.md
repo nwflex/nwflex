@@ -264,9 +264,6 @@ is visible side by side. NW-flex remains correct by construction.
 ## Not included
 
 - No changes to the NW-flex core algorithm.
-- No full benchmarking harness or command-line sweep tooling. The
-  notebooks generate representative slices inline; larger-scale
-  results are deferred.
 - No external service or large-data dependency. The notebooks run on
   the committed panel TSV plus `bwa` and `samtools` on `PATH`; if
   those are missing, the BWA cells skip cleanly with an installation
@@ -281,18 +278,16 @@ to run, not for any one area to be finished first.
 **Notebook 7 — single repeat**
 - [x] Outline, introduction, setup
 - [x] Simulation setup — locus, haplotype, reads
-- [ ] Simulation setup — mirror frame (built; **in progress** moving it
-      out of the alignment-configurations section into setup)
+- [x] Simulation setup — mirror frame (in the setup section)
 - [x] Three alignment configurations (BWA std/no-clip + NW-flex, with
       closer-look and SW-vs-NW score explainer)
-- [ ] Verdict section — two-axis (length, score) framing with the
-      inequivalence-of-orientations material; currently still mixed
-      into the alignment-configurations section as the correctness
-      rule + score-columns + inequivalence subsections
+- [x] Verdict — two-axis (length, score) framing; lives as the
+      `### Correctness rule` subsection of the alignment-configurations
+      section, with the strand-inequivalence material in `### Mirror`
 - [x] First comparison — length variation
 - [x] Second comparison — SNV in flank (with the NW-flex tie/outscored
       diagnostic)
-- [ ] Summary
+- [x] Summary
 
 **Notebook 8 — compound repeat**
 - [x] Outline, setup, scoring carry-through
@@ -302,13 +297,13 @@ to run, not for any one area to be finished first.
 - [x] Correctness rule and truth-alignment helpers for compound
 - [x] $(\Delta_1, \Delta_2)$ sweep with per-arm heatmaps
 - [x] Bridge-length effect grid
-- [ ] Verdict section aligned to the two-axis framing once Notebook 7
-      lands it
-- [ ] Mirror frame for NW-flex symmetric treatment
-- [ ] Summary
+- [x] Verdict — `## Two-level correctness` (per-block length checks
+      plus the score relationship)
+- [x] Mirror frame for NW-flex symmetric treatment
+- [x] Summary
 
-**Package code** (lives in `nwflex/simulation/`, split into `core.py`
-and `viz.py`)
+**Package code** (lives in `nwflex/simulation/`, split into `core.py`,
+`viz.py`, and `sweep.py`)
 - [x] Default parameters for the score schemas in use
 - [x] Panel loading and locus construction
 - [x] Haplotype and read tiling
@@ -325,8 +320,12 @@ and `viz.py`)
 - [x] Mirror frame — `build_mirror_frame`
 - [x] Compound-repeat helpers (`CompoundLocus`, multi-block EP,
       `is_arm_correct_multi`, compound truth-CIGAR builder)
-- [ ] NW-flex mirror wrapper that mirrors NW-flex's strand handling
-      under matched conditions (currently inline in notebook)
+- [x] NW-flex harness — `align_nwflex` / `NwflexResult` in `core.py`,
+      with strand handling driven by the mirror frame
+- [x] Sweep harness — `sweep.py`: `SweepVariant`, `make_variant`,
+      `sweep`, `pivot_for_heatmap`, the `BWAMethod` / `NWFlexMethod`
+      method classes (plus `BWACompoundMethod` / `NWFlexCompoundMethod`),
+      `wrap_methods_for_multizone_truth`, and `aggregate_per_cell`
 
 **Data and tests**
 - [x] Panel TSV in `data/`
@@ -334,11 +333,16 @@ and `viz.py`)
 - [x] Tests covering the simulation modules — see `tests/test_simulation.py`
 
 **Repo plumbing**
-- [ ] Add Notebook 7 and Notebook 8 to `notebooks/build_pdf.sh`
-- [ ] Note the `bwa` and `samtools` runtime requirements in the install
+- [x] Add Notebook 7 and Notebook 8 to `notebooks/build_pdf.sh`
+- [x] Note the `bwa` and `samtools` runtime requirements in the install
       docs
+
+**Scripts** (`scripts/`)
+- [x] Cross-locus batch sweep — `run_batch_sweep.py`, with
+      `aggregate_results.py` / `aggregate_per_locus_for_A.py` for
+      per-locus rollups and `sweep_viz.py` / `build_manuscript_figures.py`
+      / `build_stats_tables.py` for figures and tables
 
 **Later**
 - [x] Appendix notebook documenting TRF and panel construction
       (`Appendix_TRF.ipynb` exists; polish deferred)
-- [ ] Scripts for data generation at scale

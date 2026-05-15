@@ -199,9 +199,10 @@ def _add_colorbar_and_legend(fig, cmap, norm):
     )
 
 
-def _save(fig, name):
-    OUT_DIR.mkdir(parents=True, exist_ok=True)
-    out_png = OUT_DIR / f"{name}.png"
+def _save(fig, name, subdir=None):
+    d = OUT_DIR if subdir is None else OUT_DIR / subdir
+    d.mkdir(parents=True, exist_ok=True)
+    out_png = d / f"{name}.png"
     fig.savefig(out_png, dpi=144, bbox_inches="tight")
     fig.savefig(out_png.with_suffix(".pdf"), bbox_inches="tight")
     plt.close(fig)
@@ -210,14 +211,19 @@ def _save(fig, name):
 
 # ---- figures --------------------------------------------------------------
 
-SINGLE_MOTIF_LEN = 2     # filter single-locus figs to this motif length
+SINGLE_MOTIF_LEN = 3              # primary motif length for manuscript figs (trinucleotide)
+SINGLE_MOTIF_LENGTHS = [1, 2, 3]  # generate one figure set per length, each to its own subdir
 COMPOUND_L1L2 = (2, 3)   # filter compound aggregate to this (L1, L2)
 
 
-def build_fig1():
-    """Single, no SNV; columns = N values; pooled across motif lengths."""
+def build_fig1(motif_len: int = SINGLE_MOTIF_LEN):
+    """Single, no SNV; columns = N values; one motif length per call.
+
+    Call once per entry in ``SINGLE_MOTIF_LENGTHS``; each version is
+    saved to ``supplement/figures_priority/motif_L{motif_len}/``."""
     df = pd.read_csv(SINGLE_CSV)
     df = df[df["snv_offset"] == -1]
+    df = df[df["motif_len"] == motif_len]
     pooled = pool_single(df, keep=["arm", "N", "delta", "lflank"])
     n_values = sorted(pooled["N"].unique())
     deltas = sorted(pooled["delta"].unique())
@@ -248,17 +254,21 @@ def build_fig1():
         hspace=0.075,
     )
     _add_colorbar_and_legend(fig, cmap, norm)
-    _save(fig, "fig1__single_noSNV_byN")
+    _save(fig, "fig1__single_noSNV_byN", subdir=f"motif_L{motif_len}")
 
 
-def build_fig2(N_value: int):
-    """Single, SNV stack at fixed N; columns = SNV offsets; pooled
-    across motif lengths."""
+def build_fig2(N_value: int, motif_len: int = SINGLE_MOTIF_LEN):
+    """Single, SNV stack at fixed N; columns = SNV positions (1-indexed).
+
+    Columns show positions 1, 2, 5, 10 (bases from repeat boundary,
+    1-indexed) = snv_offset values 0, 1, 4, 9 in the raw data.
+    Call once per motif length; saved to motif_L{motif_len}/ subdir."""
     df = pd.read_csv(SINGLE_CSV)
     df = df[df["N"] == N_value]
+    df = df[df["motif_len"] == motif_len]
     pooled = pool_single(df, keep=["arm", "snv_offset", "delta", "lflank"])
-    snv_cols = [0, 1, 5, 10]
-    snv_labels = ["SNV @ +0", "SNV @ +1", "SNV @ +5", "SNV @ +10"]
+    snv_cols = [0, 1, 4, 9]
+    snv_labels = ["SNV @ 1", "SNV @ 2", "SNV @ 5", "SNV @ 10"]
     deltas = sorted(pooled["delta"].unique())
     lflanks = sorted(pooled["lflank"].unique())
 
@@ -287,7 +297,7 @@ def build_fig2(N_value: int):
         hspace=0.075,
     )
     _add_colorbar_and_legend(fig, cmap, norm)
-    _save(fig, f"fig2__single_snv_stack_N{N_value:02d}")
+    _save(fig, f"fig2__single_snv_stack_N{N_value:02d}", subdir=f"motif_L{motif_len}")
 
 
 def _load_compound_for_monodi():
@@ -543,8 +553,8 @@ def build_A3():
                 linewidth=2.0, markersize=5)
         ax.fill_between(x, m - sd, m + sd, color=c, alpha=0.15, linewidth=0)
     ax.set_xticks(list(order_index.values()))
-    ax.set_xticklabels([("none" if v == -1 else f"+{v}") for v in order])
-    ax.set_xlabel("SNV offset into left flank", fontsize=10)
+    ax.set_xticklabels([("none" if v == -1 else str(v + 1)) for v in order])
+    ax.set_xlabel("SNV position in left flank (1 = repeat boundary)", fontsize=10)
     ax.set_ylabel("fraction with score = truth (fwd+rc avg)", fontsize=10)
     ax.set_ylim(-0.05, 1.05)
     ax.grid(True, linestyle=":", color="#bbbbbb", alpha=0.7)
@@ -671,11 +681,13 @@ def main():
     do_all = "all" in selected
 
     if do_all or "1" in selected:
-        print("=== fig 1 ===")
-        build_fig1()
+        for L in SINGLE_MOTIF_LENGTHS:
+            print(f"=== fig 1 (motif_len = {L}) ===")
+            build_fig1(L)
     if do_all or "2" in selected:
-        print("=== fig 2 (N = 10) ===")
-        build_fig2(10)
+        for L in SINGLE_MOTIF_LENGTHS:
+            print(f"=== fig 2 (N = 10, motif_len = {L}) ===")
+            build_fig2(10, L)
     if do_all or "3" in selected:
         print("=== fig 3 ===")
         build_fig3()

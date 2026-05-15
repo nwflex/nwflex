@@ -777,8 +777,8 @@ def _draw_state_panel(ax, sub_df, *, deltas, lflanks, color_of, fontsize):
 
 _STATE_COLOR_DEFAULTS = dict(
     color_recovered="#08519c",    # dark blue   — P
-    color_co_optimal="#6baed6",   # light blue  — T
-    color_dominant="#ffffff",     # white       — M
+    color_co_optimal="#b7d8eb",   # light blue  — T
+    color_dominant="#ebb7b7",     # light red   — M
     color_dominated="#c0392b",    # red         — D
     color_nan="#cccccc",          # grey        — missing/NaN
 )
@@ -806,8 +806,8 @@ def plot_correctness_heatmap(
     lflanks: Iterable[int],
     arm_titles: Mapping[str, str],
     color_recovered: str = "#08519c",    # dark blue
-    color_co_optimal: str = "#6baed6",   # light blue
-    color_dominant: str = "#ffffff",     # white
+    color_co_optimal: str = "#b7d8eb",   # light blue
+    color_dominant: str = "#ebb7b7",     # light red
     color_dominated: str = "#c0392b",    # red
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -835,7 +835,7 @@ def plot_correctness_heatmap(
 
     - ``"P"`` ``✓ =`` → dark blue   (alignment correct; score equals truth)
     - ``"T"`` ``✗ =`` → light blue  (alignment wrong; score equals truth)
-    - ``"M"`` ``✗ <`` → white       (alignment wrong; chosen scores below
+    - ``"M"`` ``✗ <`` → light red   (alignment wrong; chosen scores below
       truth — the aligner's heuristic settled for less)
     - ``"D"`` ``✗ >`` → red         (alignment wrong; chosen scores above
       truth — the scoring landscape rejects truth)
@@ -922,7 +922,8 @@ def plot_correctness_heatmap(
     ]
 
     panel_top = 0.86 if suptitle else 0.92
-    fig.subplots_adjust(right=0.70, top=panel_top, bottom=0.10)
+    panel_left, panel_right = 0.09, 0.70
+    fig.subplots_adjust(left=panel_left, right=panel_right, top=panel_top, bottom=0.10)
 
     legend_y = 0.5 * panel_top + 0.05
     fig.legend(
@@ -945,13 +946,15 @@ def plot_correctness_heatmap(
         labelcolor="#222222",
     )
 
+    # Center the title block over the panel area, not the whole figure
+    # (which includes the legend on the right) — otherwise suptitle and
+    # subtitle drift apart and read as off-centered.
+    cx = (panel_left + panel_right) / 2
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.97,
+        fig.suptitle(suptitle, x=cx, fontsize=title_size + 1, y=0.97,
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        sub_y = 0.93 if suptitle is not None else 0.95
-        # Center on the panel area (not the whole figure, which includes legend).
-        cx = (axes[0].get_position().x0 + axes[-1].get_position().x1) / 2
+        sub_y = 0.91 if suptitle is not None else 0.95
         fig.text(cx, sub_y, subtitle, ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
@@ -996,8 +999,8 @@ def plot_correctness_heatmap_rows(
     arm_titles: Mapping[str, str],
     row_label_fn,
     color_recovered: str = "#08519c",
-    color_co_optimal: str = "#6baed6",
-    color_dominant: str = "#ffffff",
+    color_co_optimal: str = "#b7d8eb",
+    color_dominant: str = "#ebb7b7",
     color_dominated: str = "#c0392b",
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -1298,8 +1301,8 @@ def plot_correctness_heatmap_2d(
     arm_titles: Mapping[str, str],
     combine_across_reads: str = "best",
     color_recovered: str = "#08519c",
-    color_co_optimal: str = "#6baed6",
-    color_dominant: str = "#ffffff",
+    color_co_optimal: str = "#b7d8eb",
+    color_dominant: str = "#ebb7b7",
     color_dominated: str = "#c0392b",
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -1363,7 +1366,7 @@ def plot_correctness_heatmap_2d(
     top_in    = 1.30
     bottom_in = 0.50
     sup_in    = 0.20
-    sub_in    = 0.55 if suptitle is not None else 0.30
+    sub_in    = 0.65 if suptitle is not None else 0.30
     panel_top = 1.0 - top_in / fig_h
     fig.subplots_adjust(left=0.06, right=0.82,
                         top=panel_top, bottom=bottom_in / fig_h)
@@ -1383,12 +1386,15 @@ def plot_correctness_heatmap_2d(
         facecolor="white", edgecolor="#444444", labelcolor="#222222",
     )
 
+    # Center the title block over the panel area (left..right), not the
+    # whole figure, so suptitle and subtitle stay aligned with each other.
+    cx = (0.06 + 0.82) / 2
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1,
+        fig.suptitle(suptitle, x=cx, fontsize=title_size + 1,
                      y=1.0 - sup_in / fig_h,
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        fig.text(0.5, 1.0 - sub_in / fig_h, subtitle,
+        fig.text(cx, 1.0 - sub_in / fig_h, subtitle,
                  ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
@@ -1405,8 +1411,8 @@ def plot_correctness_heatmap_2d_rows(
     row_label_fn=None,
     combine_across_reads: str = "best",
     color_recovered: str = "#08519c",
-    color_co_optimal: str = "#6baed6",
-    color_dominant: str = "#ffffff",
+    color_co_optimal: str = "#b7d8eb",
+    color_dominant: str = "#ebb7b7",
     color_dominated: str = "#c0392b",
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -1564,7 +1570,7 @@ def plot_proportion_heatmap_2d(
     top_in    = 1.30
     bottom_in = 0.50
     sup_in    = 0.20
-    sub_in    = 0.55 if suptitle is not None else 0.30
+    sub_in    = 0.65 if suptitle is not None else 0.30
     panel_top = 1.0 - top_in / fig_h
     fig.subplots_adjust(left=0.06, right=0.82,
                         top=panel_top, bottom=bottom_in / fig_h)
@@ -1598,12 +1604,15 @@ def plot_proportion_heatmap_2d(
         facecolor="white", edgecolor="#444444", labelcolor="#222222",
     )
 
+    # Center the title block over the panel area (left..right), not the
+    # whole figure, so suptitle and subtitle stay aligned with each other.
+    cx = (0.06 + 0.82) / 2
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1,
+        fig.suptitle(suptitle, x=cx, fontsize=title_size + 1,
                      y=1.0 - sup_in / fig_h,
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        fig.text(0.5, 1.0 - sub_in / fig_h, subtitle,
+        fig.text(cx, 1.0 - sub_in / fig_h, subtitle,
                  ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
@@ -1743,6 +1752,10 @@ def plot_compound_layout_schematic(
     bridge_len: int,
     delta1_example: int = 0,
     delta2_example: int = 0,
+    delta1_range: Tuple[int, int] | None = None,
+    delta2_range: Tuple[int, int] | None = None,
+    bridge_len_range: Tuple[int, int] | None = None,
+    lflank_range: Tuple[int, int] | None = None,
     nwflex_factor: int = 3,
     show_nwflex: bool = True,
     mirror: bool = False,
@@ -1890,8 +1903,13 @@ def plot_compound_layout_schematic(
     ax.text(flank_w + block1_panel_w / 2, label_y,
             f"$R_1^{{{ref_n1}}}$", ha="center", va="bottom",
             fontsize=fontsize, color="#1f6090", fontweight="bold")
+    if bridge_len_range is not None:
+        lo, hi = bridge_len_range
+        m_label = f"$M \\in [{lo}, {hi}]$ bp"
+    else:
+        m_label = f"$M$ ({bridge_len} bp)"
     ax.text(flank_w + block1_panel_w + bridge_w / 2, label_y,
-            f"$M$ ({bridge_len} bp)", ha="center", va="bottom",
+            m_label, ha="center", va="bottom",
             fontsize=fontsize, color=bridge_edge, fontweight="bold")
     ax.text(flank_w + block1_panel_w + bridge_w + block2_panel_w / 2,
             label_y,
@@ -1971,26 +1989,36 @@ def plot_compound_layout_schematic(
     x0 += block2_panel_w
     _flank(x0, y_hap, flank_w, "right flank")
 
-    if delta1_example != 0:
+    if delta1_example != 0 or delta1_range is not None:
         cx = flank_w + block1_panel_w / 2
         ax.annotate(
             "", xy=(cx - 0.5, y_hap + bar_h + 0.10),
             xytext=(cx + 0.5, y_hap + bar_h + 0.10),
             arrowprops=dict(arrowstyle="<->", color=missing_edge, lw=1.4),
         )
+        if delta1_range is not None:
+            lo, hi = delta1_range
+            d1_label = f"$\\Delta_1 \\in [{lo:+d}, {hi:+d}]$"
+        else:
+            d1_label = f"$\\Delta_1 = {delta1_example:+d}$"
         ax.text(cx, y_hap + bar_h + 0.28,
-                f"$\\Delta_1 = {delta1_example:+d}$",
+                d1_label,
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
-    if delta2_example != 0:
+    if delta2_example != 0 or delta2_range is not None:
         cx = flank_w + block1_panel_w + bridge_w + block2_panel_w / 2
         ax.annotate(
             "", xy=(cx - 0.5, y_hap + bar_h + 0.10),
             xytext=(cx + 0.5, y_hap + bar_h + 0.10),
             arrowprops=dict(arrowstyle="<->", color=missing_edge, lw=1.4),
         )
+        if delta2_range is not None:
+            lo, hi = delta2_range
+            d2_label = f"$\\Delta_2 \\in [{lo:+d}, {hi:+d}]$"
+        else:
+            d2_label = f"$\\Delta_2 = {delta2_example:+d}$"
         ax.text(cx, y_hap + bar_h + 0.28,
-                f"$\\Delta_2 = {delta2_example:+d}$",
+                d2_label,
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
 
@@ -2051,8 +2079,13 @@ def plot_compound_layout_schematic(
         xytext=(flank_w, arrow_y),
         arrowprops=dict(arrowstyle="<->", color=read_outline, lw=1.4),
     )
+    if lflank_range is not None:
+        lo, hi = lflank_range
+        lflank_label = f"lflank extent $\\in [{lo}, {hi}]$"
+    else:
+        lflank_label = "lflank extent"
     ax.text(flank_w - top_lflank / 2, text_y,
-            "lflank extent",
+            lflank_label,
             ha="center", va="bottom",
             fontsize=fontsize - 1, color=read_outline, fontweight="bold")
 

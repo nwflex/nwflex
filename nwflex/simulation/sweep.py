@@ -266,6 +266,20 @@ class BWAMethod:
         )
 
 
+def _to_dp_convention(score_kwargs: Mapping[str, Any]) -> dict:
+    """Bridge stand-alone-open scoring (BWA / ``score_alignment``) to the
+    NW-flex DP's subsumed-open convention.
+
+    A length-L gap costs ``go + L*ge`` under convention A (stand-alone open,
+    e.g. BWA's ``O + k*E``) and ``go + (L-1)*ge`` under convention B (the
+    Gotoh recurrence the DP implements). Shifting ``gap_open`` by ``+ge``
+    makes the DP charge the same effective per-gap cost as the convention-A
+    scheme it was handed. See ``scripts/check_gap_conventions.py``.
+    """
+    return {**score_kwargs,
+            "gap_open": score_kwargs["gap_open"] + score_kwargs["gap_extend"]}
+
+
 class NWFlexMethod:
     """NW-flex as a single-repeat sweep method.
 
@@ -273,6 +287,11 @@ class NWFlexMethod:
     the STR-aware extra-predecessor pattern. NW-flex's hit score is the
     NW score by construction, so ``classify`` uses it directly without
     rescoring.
+
+    ``score_kwargs`` is taken as stand-alone-open (convention A, the
+    ``score_alignment`` / BWA convention). ``truth()`` calls
+    ``score_alignment`` and uses it as-is; ``run()`` feeds the NW-flex DP
+    (convention B) via :func:`_to_dp_convention`.
     """
 
     def __init__(self, name, nwflex_locus, rc_nwflex_X, rc_nwflex_zone,
@@ -284,15 +303,16 @@ class NWFlexMethod:
         self.ep_fwd = ep_fwd
         self.ep_rc = ep_rc
         self.score_kwargs = score_kwargs
+        self._dp_score_kwargs = _to_dp_convention(score_kwargs)
 
     def run(self, reads, orient):
         if orient == "fwd":
             return align_nwflex(self.nwflex_locus.X, reads,
                                 extra_predecessors=self.ep_fwd,
-                                **self.score_kwargs)
+                                **self._dp_score_kwargs)
         return align_nwflex(self.rc_nwflex_X, mirror_reads(reads),
                             extra_predecessors=self.ep_rc,
-                            **self.score_kwargs)
+                            **self._dp_score_kwargs)
 
     def truth(self, read, hap):
         pos, cig = nwflex_truth_cigar(read, hap, self.nwflex_locus)
@@ -365,6 +385,11 @@ class NWFlexCompoundMethod:
     the hit's score is the NW score, so ``classify`` uses it directly.
     ``truth_z_bp`` is the haplotype's ``body_lens`` tuple; use
     :func:`wrap_methods_for_multizone_truth` to thread it through.
+
+    ``score_kwargs`` is taken as stand-alone-open (convention A); the DP
+    is fed the convention-B equivalent via :func:`_to_dp_convention`.
+    ``truth()`` (which routes through ``score_alignment``) uses
+    ``score_kwargs`` as-is.
     """
 
     def __init__(self, name, compound, rc_X_ext, rc_zones_ext,
@@ -376,15 +401,16 @@ class NWFlexCompoundMethod:
         self.ep_fwd = ep_fwd
         self.ep_rc = ep_rc
         self.score_kwargs = score_kwargs
+        self._dp_score_kwargs = _to_dp_convention(score_kwargs)
 
     def run(self, reads, orient):
         if orient == "fwd":
             return align_nwflex(self.compound.X_ext, reads,
                                 extra_predecessors=self.ep_fwd,
-                                **self.score_kwargs)
+                                **self._dp_score_kwargs)
         return align_nwflex(self.rc_X_ext, mirror_reads(reads),
                             extra_predecessors=self.ep_rc,
-                            **self.score_kwargs)
+                            **self._dp_score_kwargs)
 
     def truth(self, read, hap):
         pos, cig = nwflex_compound_truth_cigar(read, hap, self.compound)

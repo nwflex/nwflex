@@ -212,6 +212,12 @@ pip install -e .[notebooks]
 pip install -e .[all]
 ```
 
+> **Notebooks 07–08** additionally require `bwa` and `samtools` on your `PATH`
+> — they shell out to BWA-MEM for the NW-flex vs BWA-MEM comparison. Install
+> them with your system package manager, e.g. `conda install -c bioconda bwa
+> samtools`. If either is missing, the BWA cells skip cleanly with an
+> installation hint; the rest of each notebook still runs.
+
 ## Terminology
 
 **NW-flex** uses the following notation throughout the codebase and documentation, reflecting the formalism in the preprint:

@@ -16,6 +16,13 @@ and produces a handful of focused tables, each emitted as both CSV
 - **motif_length_breakdown** — for compound: per-arm × motif-length-
   pair (L1, L2), the mean fraction of cells where score equals truth.
 
+The single-repeat cross-locus tables are restricted to trinucleotide
+(3-mer) loci — the primary focus of this analysis — so a pooled
+headline number is not silently weighted by the panel's motif-length
+composition (400 / 1,080 / 5,420 loci at length 1 / 2 / 3).
+``single_motif_length_breakdown`` is the exception, kept unfiltered as
+the deliberate motif-length view.
+
 Usage::
 
     python scripts/build_stats_tables.py --config scripts/configs/main.yaml
@@ -31,6 +38,11 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Single-repeat cross-locus tables are reported on the trinucleotide
+# slice — see the module docstring.  _single_motif_length_breakdown is
+# the deliberate exception (kept unfiltered).
+SINGLE_MOTIF_LEN = 3
 
 
 def load_config(path: Path) -> Mapping[str, Any]:
@@ -394,19 +406,30 @@ def main() -> None:
 def _maybe_single(sr_df, tables_dir: Path) -> None:
     if sr_df is None:
         return
-    sr_recovery = _single_recovery_by_n_snv(sr_df)
+
+    # The single-repeat panel is 400 / 1,080 / 5,420 loci at motif
+    # length 1 / 2 / 3, so any statistic pooled across motif length is
+    # ~79% trinucleotide by construction.  Rather than reweight, the
+    # cross-locus tables below are reported on the trinucleotide slice.
+    # _single_motif_length_breakdown
+    # is the deliberate exception: it stays unfiltered as the
+    # motif-length view.
+    sr_di = sr_df[sr_df["motif_len"] == SINGLE_MOTIF_LEN]
+
+    sr_recovery = _single_recovery_by_n_snv(sr_di)
     _write_table(
         sr_recovery, tables_dir, "single_recovery_by_N_snv",
         caption=("Single-repeat cross-locus recovery, per arm × $N$ × "
-                 "SNV offset.  ``snv\\_offset = -1`` means no SNV."),
+                 "SNV offset.  ``snv\\_offset = -1`` means no SNV.  "
+                 "Restricted to trinucleotide (3-mer) loci."),
         label="tab:single-recovery-by-N-snv",
     )
 
-    sr_asym = _single_strand_asymmetry(sr_df)
+    sr_asym = _single_strand_asymmetry(sr_di)
     _write_table(
         sr_asym, tables_dir, "single_strand_asymmetry",
         caption=("Single-repeat per-arm strand-asymmetry rate, broken "
-                 "out by SNV offset."),
+                 "out by SNV offset.  Trinucleotide (3-mer) loci only."),
         label="tab:single-strand-asymmetry",
     )
 
@@ -414,22 +437,24 @@ def _maybe_single(sr_df, tables_dir: Path) -> None:
     _write_table(
         sr_motif, tables_dir, "single_motif_length_breakdown",
         caption=("Mean fraction of locus cells in which score equals "
-                 "truth, stratified by motif length and SNV offset."),
+                 "truth, stratified by motif length and SNV offset.  "
+                 "This table spans all motif lengths (1--3); the other "
+                 "single-repeat tables are restricted to trinucleotides."),
         label="tab:single-motif-length-breakdown",
     )
 
-    sr_per_locus = _single_per_locus_distribution(sr_df)
+    sr_per_locus = _single_per_locus_distribution(sr_di)
     _write_table(
         sr_per_locus, tables_dir, "single_per_locus_distribution",
         caption=("Per-locus distribution of the fraction of "
                  "$(\\Delta, \\text{lflank})$ cells where score equals "
                  "truth, across selected loci.  ``frac\\_loci\\_at\\_*"
                  "`` answers \"what fraction of loci hit at least this "
-                 "success rate?\""),
+                 "success rate?\"  Trinucleotide (3-mer) loci only."),
         label="tab:single-per-locus-distribution",
     )
 
-    nwflex_t = _nwflex_t_breakdown(sr_df)
+    nwflex_t = _nwflex_t_breakdown(sr_di)
     _write_table(
         nwflex_t, tables_dir, "single_nwflex_T_breakdown",
         caption=("NW-flex failures in the single-repeat sweep: each "
@@ -437,7 +462,7 @@ def _maybe_single(sr_df, tables_dir: Path) -> None:
                  "least one locus did not land in state P, broken out "
                  "by SNV offset.  ``frac\\_T`` and ``frac\\_D`` are the "
                  "fraction of loci in the tied and dominated state "
-                 "respectively."),
+                 "respectively.  Trinucleotide (3-mer) loci only."),
         label="tab:single-nwflex-T-breakdown",
     )
 

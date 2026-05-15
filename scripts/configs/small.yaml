@@ -1,7 +1,7 @@
 # Small batch (~30 minutes): single-repeat sweep only.
 #
 # Runs the single-repeat half of the comprehensive sweep — every panel
-# locus × {Δ ∈ [-5, 5]} × {3 reference repeat counts} × {7 SNV slots} —
+# locus × {Δ ∈ [-5, 5]} × {3 reference repeat counts} × {5 SNV slots} —
 # writing one tidy-frame CSV shard per (locus, params) task to
 # supplement/data/single_repeat/. The compound block is vacated so this
 # config does no compound work; pair it with large.yaml for the full
@@ -21,7 +21,7 @@ single_repeat:
                               # ALL panel loci (~6,899 after filtering)
   N_values: [5, 10, 20]
   delta_range: [-5, 5]
-  snv_positions: [null, 0, 1, 2, 3, 5, 10]   # null = no SNV
+  snv_positions: [null, 0, 1, 4, 9]   # null = no SNV; 1-indexed positions: none, 1, 2, 5, 10
   read_len: 150
   k_min_flank: 1
 
