@@ -407,6 +407,16 @@ def _maybe_single(sr_df, tables_dir: Path) -> None:
     if sr_df is None:
         return
 
+    # Tables display the SNV position 1-indexed from the repeat
+    # boundary; the underlying CSV column is 0-indexed (k=0 means the
+    # base immediately adjacent to the boundary).  Sentinel -1 ("no
+    # SNV") is preserved.
+    sr_df = sr_df.assign(
+        snv_offset=sr_df["snv_offset"].where(
+            sr_df["snv_offset"] == -1, sr_df["snv_offset"] + 1
+        )
+    )
+
     # The single-repeat panel is 400 / 1,080 / 5,420 loci at motif
     # length 1 / 2 / 3, so any statistic pooled across motif length is
     # ~79% trinucleotide by construction.  Rather than reweight, the

@@ -191,7 +191,7 @@ repeat count varying over $N + \Delta$ for a small range of $\Delta$.
 
 NW-flex is uniformly **length-correct**. BWA-MEM at standard
 parameters is mostly *missed* — the heuristic chose a soft-clip
-alignment whose NW score (with soft-clip charged like a deletion)
+alignment whose NW score (with soft-clip charged like an insertion)
 sits below the truth-shape alignment's. A smaller band of cells
 still flips to *outscored*, reflecting reads where BWA-MEM picks a
 non-truth, non-clip alignment that beats truth on the score

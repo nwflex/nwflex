@@ -49,7 +49,7 @@ class SweepVariant:
         or ``{"delta": -3, "snv": "T>A"}``).
     hap : object
         Haplotype-like object.  Must expose ``body_len``; methods may
-        use it for truth-CIGAR construction.
+        use it for ground-truth-CIGAR construction.
     reads : list
         Reads to evaluate against every method.  Order is preserved.
     """
@@ -96,9 +96,9 @@ def sweep(variants: Iterable[SweepVariant],
         per input read, in input order.  The method is responsible for
         any orient-specific reference / mirror-read transformation.
     - ``truth(r, hap) -> float``
-        NW score of the truth alignment for this ``(read, hap)`` pair.
-        Strand-symmetric, so it's computed once per cell and shared
-        between the fwd and rc classifications.
+        NW score of the ground-truth alignment for this ``(read, hap)``
+        pair.  Strand-symmetric, so it's computed once per cell and
+        shared between the fwd and rc classifications.
     - ``classify(hit, r, truth_score, truth_z_bp, orient) -> str``
         State classification (``"P"``/``"T"``/``"M"``/``"D"``).
 
@@ -132,7 +132,7 @@ def sweep(variants: Iterable[SweepVariant],
         for orient in ("fwd", "rc")
     }
 
-    # 3. Per-cell truth + classify.
+    # 3. Per-cell ground truth + classify.
     rows = []
     for v, lo, hi in slices:
         truth_z_bp = v.hap.body_len
@@ -331,8 +331,8 @@ class NWFlexMethod:
 class BWACompoundMethod:
     """BWA-MEM as a compound-repeat sweep method.
 
-    Same shape as :class:`BWAMethod`, but uses the compound truth-CIGAR
-    builder and the multi-zone classifier. ``truth_z_bp`` here is the
+    Same shape as :class:`BWAMethod`, but uses the compound
+    ground-truth-CIGAR builder and the multi-zone classifier. ``truth_z_bp`` here is the
     haplotype's ``body_lens`` tuple (one block length per repeat block);
     use :func:`wrap_methods_for_multizone_truth` to thread it through.
     """

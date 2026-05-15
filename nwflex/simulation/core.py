@@ -926,7 +926,8 @@ def is_arm_correct(
     A read is correct under an arm when both:
 
     1. ``decode_z_bp(cigar, ...) == truth_z_bp`` — the alignment placed
-       exactly the truth number of read bp inside the repeat interval.
+       exactly the ground-truth number of read bp inside the repeat
+       interval.
     2. ``flank_bases_consumed(cigar, ...)`` reports at least
        ``min_flank`` reference bp in each flank — the alignment spans
        the repeat.
@@ -1078,7 +1079,7 @@ def score_alignment(
     Per-base match/mismatch contributions come from ``score_matrix``
     (indexed via ``alphabet_to_index``).  ``N`` (skipped reference)
     is free; ``S`` (soft-clip) is charged the same affine-gap penalty
-    as a deletion of the same length — leading/terminal read bases
+    as an insertion of the same length — leading/terminal read bases
     that don't align should not score better than read bases that do
     align poorly; ``H`` and ``P`` contribute nothing.
 
@@ -1135,7 +1136,7 @@ def bwa_truth_cigar(
     locus: STRLocus,
 ) -> Tuple[int, str]:
     """
-    Construct the natural truth alignment of ``read`` against the locus
+    Construct the ground-truth alignment of ``read`` against the locus
     reference (suitable for BWA-MEM verdict comparison).
 
     The shape is ``L M  Δ·|R| {I,D}  (body_ref + Rf) M``: lflank matches,
@@ -1177,7 +1178,7 @@ def nwflex_truth_cigar(
     nwflex_locus: STRLocus,
 ) -> Tuple[int, str]:
     """
-    Construct the natural truth alignment of ``read`` against the NW-flex
+    Construct the ground-truth alignment of ``read`` against the NW-flex
     extended (3N) reference: lflank matches, a free EP skip (``N`` op)
     covering the unused motifs, then (haplotype body + rflank) matches.
 
@@ -1225,21 +1226,25 @@ def alignment_state(
     min_flank: int = 1,
 ) -> str:
     """
-    Classify a single alignment against the truth into one of four
-    states.  Each state has a two-symbol code: the first symbol is the
-    alignment outcome (``✓`` correct, ``✗`` wrong), the second is the
-    chosen alignment's NW score relative to truth's NW score (``=``
-    tied, ``<`` chosen below truth, ``>`` chosen above truth):
+    Classify a single alignment against the ground truth into one of
+    four states.  Each state has a two-symbol code: the first symbol is
+    the alignment outcome (``✓`` correct, ``✗`` wrong), the second is
+    the chosen alignment's NW score relative to the ground-truth NW
+    score (``=`` tied, ``<`` chosen below ground truth, ``>`` chosen
+    above ground truth):
 
-    - ``"P"`` (``✓ =``): the chosen CIGAR recovers the truth z-bp under
-      :func:`is_arm_correct` — alignment correct, score trivially equal.
+    - ``"P"`` (``✓ =``): the chosen CIGAR recovers the ground-truth
+      z-bp under :func:`is_arm_correct` — alignment correct, score
+      trivially equal.
     - ``"T"`` (``✗ =``): alignment wrong, but ``chosen_score ==
-      truth_score``.  The aligner *could* have picked truth; tie-break
-      landed elsewhere.
+      truth_score``.  The aligner *could* have picked the ground-truth
+      alignment; tie-break landed elsewhere.
     - ``"M"`` (``✗ <``): alignment wrong, ``chosen_score < truth_score``.
-      The aligner's heuristic settled for less than truth.
+      The aligner's heuristic settled for less than the ground-truth
+      score.
     - ``"D"`` (``✗ >``): alignment wrong, ``chosen_score > truth_score``.
-      The scoring landscape prefers a wrong alignment over truth.
+      The scoring landscape prefers a wrong alignment over the ground
+      truth.
 
     Unmapped reads (``cigar`` or ``pos_1based`` ``None``) classify as
     ``"D"``.
@@ -1261,7 +1266,7 @@ def alignment_state(
 _STATE_PRIORITY = {"P": 0, "T": 1, "M": 2, "D": 3}
 
 _STATE_GLYPHS = {
-    # length glyph (✓/✗)  +  score glyph (=, <, >) vs truth.
+    # length glyph (✓/✗)  +  score glyph (=, <, >) vs ground truth.
     "P": "✓  =",
     "T": "✗  =",
     "M": "✗  <",
@@ -1274,8 +1279,9 @@ def state_to_glyph(state: str) -> str:
     Format an :func:`alignment_state` classification as a two-glyph string.
 
     Each state has a length glyph (``✓`` if the alignment recovers the
-    truth repeat length, ``✗`` otherwise) and a score glyph (``=`` for
-    score equal to truth, ``<`` below truth, ``>`` above truth):
+    ground-truth repeat length, ``✗`` otherwise) and a score glyph
+    (``=`` for score equal to ground truth, ``<`` below ground truth,
+    ``>`` above ground truth):
 
     - ``"P"`` → ``"✓  ="``
     - ``"T"`` → ``"✗  ="``
@@ -1452,8 +1458,8 @@ def build_compound_mirror_frame(compound: CompoundLocus, reads):
     """Compound analogue of build_mirror_frame: rc the BWA reference, the
     NW-flex extended reference, the reads, and both pairs of zones.
     Indexed zone-by-zone (``rc_zones[i]`` is the rc of forward
-    ``zones[i]``) so a per-block truth comparison can keep the same
-    ``i`` mapping in both frames."""
+    ``zones[i]``) so a per-block ground-truth comparison can keep the
+    same ``i`` mapping in both frames."""
     rc_X = reverse_complement(compound.X)
     rc_X_ext = reverse_complement(compound.X_ext)
     rc_reads = mirror_reads(reads)
@@ -1471,9 +1477,9 @@ def is_arm_correct_multi(
     """Return ``(per_block_correct, all_correct)``.
 
     Per-block check: ``decode_z_bp`` inside each zone must equal the
-    corresponding truth bp. Outer span check: the alignment must consume
-    at least ``min_flank`` reference bp outside both the leftmost and
-    rightmost zones (so it actually spans both blocks).
+    corresponding ground-truth bp. Outer span check: the alignment must
+    consume at least ``min_flank`` reference bp outside both the
+    leftmost and rightmost zones (so it actually spans both blocks).
 
     Outer endpoints are computed as ``min`` / ``max`` over zone starts
     / ends so the check is orientation-agnostic — fwd zones (listed in
@@ -1511,8 +1517,9 @@ def _merge_m_ops(ops):
 
 
 def bwa_compound_truth_cigar(read, hap, compound: CompoundLocus):
-    """Compound BWA truth: gaps placed at the LEFT edge of each repeat
-    block so the BWA boundary convention counts insertions as inside."""
+    """Compound BWA ground truth: gaps placed at the LEFT edge of each
+    repeat block so the BWA boundary convention counts insertions as
+    inside."""
     L = read.lflank_extent
     Rf = read.rflank_extent
     d1, d2 = hap.delta1, hap.delta2
@@ -1549,7 +1556,7 @@ def bwa_compound_truth_cigar(read, hap, compound: CompoundLocus):
 
 
 def nwflex_compound_truth_cigar(read, hap, compound: CompoundLocus):
-    """Compound NW-flex truth against the extended (f·N1, f·N2)
+    """Compound NW-flex ground truth against the extended (f·N1, f·N2)
     reference: free-skip past the unused motifs at the LEFT edge of each
     block (an N op), then walk the haplotype's block bases as M."""
     L = read.lflank_extent
@@ -1589,7 +1596,7 @@ def alignment_state_multi(
 ) -> str:
     """Compound analogue of :func:`alignment_state`. Returns P / T / M / D
     using :func:`is_arm_correct_multi` for the length axis and the
-    chosen-vs-truth score comparison for the score axis."""
+    chosen-vs-ground-truth score comparison for the score axis."""
     if cigar is None or pos_1based is None or chosen_score is None:
         return "D"
     _, ok = is_arm_correct_multi(

@@ -611,9 +611,10 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
     if snv is not None:
         off = int(snv.get("offset_from_boundary", 2))
         snv_bar_w = 0.18
-        # Position the bar so the grey gap to the repeat boundary equals
-        # the bar's own width.
-        snv_bar_x = flank_w - snv_bar_w - snv_bar_w
+        # Place the bar `off` bar-widths into the left flank from the
+        # repeat boundary so the visual distance scales with the SNV
+        # offset parameter.
+        snv_bar_x = flank_w - off * snv_bar_w - snv_bar_w
         snv_x = snv_bar_x + snv_bar_w / 2
 
         # Bar on the haplotype.
@@ -830,15 +831,15 @@ def plot_correctness_heatmap(
     State colors are labeled by a two-symbol code in the legend.  The
     first symbol is the alignment outcome (``✓`` correct, ``✗`` wrong);
     the second symbol is the chosen alignment's NW score relative to
-    truth's NW score (``=`` tied, ``<`` chosen lower than truth, ``>``
-    chosen higher than truth):
+    the ground-truth NW score (``=`` tied, ``<`` chosen lower than
+    ground truth, ``>`` chosen higher than ground truth):
 
-    - ``"P"`` ``✓ =`` → dark blue   (alignment correct; score equals truth)
-    - ``"T"`` ``✗ =`` → light blue  (alignment wrong; score equals truth)
+    - ``"P"`` ``✓ =`` → dark blue   (alignment correct; score equals ground truth)
+    - ``"T"`` ``✗ =`` → light blue  (alignment wrong; score equals ground truth)
     - ``"M"`` ``✗ <`` → light red   (alignment wrong; chosen scores below
-      truth — the aligner's heuristic settled for less)
+      ground truth — the aligner's heuristic settled for less)
     - ``"D"`` ``✗ >`` → red         (alignment wrong; chosen scores above
-      truth — the scoring landscape rejects truth)
+      ground truth — the scoring landscape rejects the ground truth)
     - NaN (infeasible / missing) → grey
 
     Parameters
@@ -911,10 +912,10 @@ def plot_correctness_heatmap(
         blank,
     ]
     interleaved_labels = [
-        "✓ align, score = truth",
-        "✗ align, score = truth",
-        "✗ align, score < truth",
-        "✗ align, score > truth",
+        "✓ align, score = GT",
+        "✗ align, score = GT",
+        "✗ align, score < GT",
+        "✗ align, score > GT",
         "forward",
         "reverse",
         "",
@@ -1105,17 +1106,17 @@ def plot_correctness_heatmap_rows(
         _CircleHandle(color=shape_color),
     ]
     legend_labels = [
-        "✓ align, score = truth",
-        "✗ align, score = truth",
-        "✗ align, score < truth",
-        "✗ align, score > truth",
+        "✓ align, score = GT",
+        "✗ align, score = GT",
+        "✗ align, score < GT",
+        "✗ align, score > GT",
         "forward",
         "reverse",
     ]
 
     # Panels fill the width; legend sits below the title block, anchored
     # to the figure's left margin.  Two rows × ncol=3 (column-major):
-    # col1 = score=truth (P,T), col2 = score≠truth (M,D),
+    # col1 = score=ground truth (P,T), col2 = score≠ground truth (M,D),
     # col3 = strand shapes (fwd, rc).
     # Margins reserved in absolute inches via _rows_top_margin so the
     # forehead stays constant as n_rows grows.
@@ -1156,7 +1157,7 @@ def plot_correctness_heatmap_rows(
 # within each cell are aggregated into a per-strand summary by a
 # pluggable ``cell_value_fn``; that value is then mapped to a color by
 # ``color_fn``.  This lets the discrete (P/T/M/D state) and continuous
-# (fraction-of-score=truth) heatmaps share the panel-drawing core.
+# (fraction-of-score=ground-truth) heatmaps share the panel-drawing core.
 # ---------------------------------------------------------------------------
 
 
@@ -1283,10 +1284,10 @@ def _legend_handles_states_strands(color_recovered, color_co_optimal,
         _CircleHandle(color=shape_color),
     ]
     labels = [
-        "✓ align, score = truth",
-        "✗ align, score = truth",
-        "✗ align, score < truth",
-        "✗ align, score > truth",
+        "✓ align, score = GT",
+        "✗ align, score = GT",
+        "✗ align, score < GT",
+        "✗ align, score > GT",
         "forward",
         "reverse",
     ]
@@ -1515,10 +1516,10 @@ def plot_proportion_heatmap_2d(
     fontsize: int = 14,
     suptitle: str | None = None,
     subtitle: str | None = None,
-    cbar_label: str = "P(score = truth)",
+    cbar_label: str = "P(score = ground truth)",
 ):
     """Continuous-color 2-D heatmap of the per-strand fraction of reads
-    whose chosen alignment has score equal to truth (states P or T).
+    whose chosen alignment has score equal to ground truth (states P or T).
 
     Glyph convention matches :func:`plot_correctness_heatmap_2d`:
     Rectangle = fwd-strand proportion, Circle = rc-strand proportion.
@@ -1631,7 +1632,7 @@ def plot_proportion_heatmap_2d_rows(
     scale: float = 1.0,
     suptitle: str | None = None,
     subtitle: str | None = None,
-    cbar_label: str = "P(score = truth)",
+    cbar_label: str = "P(score = ground truth)",
 ):
     """Multi-row variant of :func:`plot_proportion_heatmap_2d`."""
     import matplotlib.pyplot as plt

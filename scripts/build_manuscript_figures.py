@@ -615,8 +615,11 @@ def build_A_panels():
     A2_pool = _per_locus_summary(pd.read_csv(A2_PER_LOCUS_CSV), "lflank")
     A3_raw = pd.read_csv(A3_PER_LOCUS_CSV)
     A3_pool_raw = _per_locus_summary(A3_raw, "snv_offset")
-    nums = sorted([s for s in A3_pool_raw["snv_offset"].unique() if s != -1])
-    snv_order = nums + ([-1] if -1 in A3_pool_raw["snv_offset"].values else [])
+    # Keep only the SNV positions we display (1-indexed 5 and 10, i.e.
+    # 0-indexed snv_offset values 4 and 9).
+    C_SNV_KEEP = [4, 9]
+    A3_pool_raw = A3_pool_raw[A3_pool_raw["snv_offset"].isin(C_SNV_KEEP)]
+    snv_order = sorted(A3_pool_raw["snv_offset"].unique())
     snv_pos = {v: i for i, v in enumerate(snv_order)}
     A3_pool = A3_pool_raw.copy()
     A3_pool["x_pos"] = A3_pool["snv_offset"].map(snv_pos)
@@ -628,12 +631,12 @@ def build_A_panels():
     )
     _build_single_panel(
         A2_pool, "lflank", "Flank Extent",
-        outname="B__flank",
+        outname="B__flank", show_legend=True,
     )
     _build_single_panel(
         A3_pool, "x_pos", "SNV position",
         xticks=list(snv_pos.values()),
-        xticklabels=[("none" if v == -1 else f"+{v}") for v in snv_order],
+        xticklabels=[str(v + 1) for v in snv_order],
         outname="C__snv",
     )
     _build_single_panel(

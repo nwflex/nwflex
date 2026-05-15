@@ -157,7 +157,7 @@ def _single_repeat_proportion_per_n(
             snv_label = "no SNV"
             snv_tag = "noSNV"
         else:
-            snv_label = f"SNV offset = {snv_offset}"
+            snv_label = f"SNV @ {int(snv_offset) + 1}"
             snv_tag = f"SNV{int(snv_offset):+d}"
         fig = plot_proportion_heatmap(
             sub,
@@ -188,7 +188,7 @@ def _single_repeat_proportion_snv_stack(
         n_loci = sub_n["pind"].nunique()
 
         def _row_label(off):
-            return "no SNV" if off == -1 else f"SNV @ {int(off)}"
+            return "no SNV" if off == -1 else f"SNV @ {int(off) + 1}"
 
         fig = plot_proportion_heatmap_rows(
             rows,
@@ -216,7 +216,7 @@ def _single_repeat_proportion_by_N(
     for snv_offset, sub in df.groupby("snv_offset"):
         rows = [(N, sub[sub["N"] == N]) for N in n_values]
         n_loci = sub["pind"].nunique()
-        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ +{int(snv_offset)}"
+        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ {int(snv_offset) + 1}"
         snv_tag = "noSNV" if snv_offset == -1 else f"SNV{int(snv_offset):+d}"
 
         fig = plot_proportion_heatmap_rows(
@@ -243,7 +243,7 @@ def _single_repeat_proportion_by_motif_length(
     motif_lengths = sorted(df["motif_len"].unique())
     for (N, snv_offset), sub in df.groupby(["N", "snv_offset"]):
         rows = [(L, sub[sub["motif_len"] == L]) for L in motif_lengths]
-        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ +{int(snv_offset)}"
+        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ {int(snv_offset) + 1}"
         snv_tag = "noSNV" if snv_offset == -1 else f"SNV{int(snv_offset):+d}"
 
         fig = plot_proportion_heatmap_rows(

@@ -659,7 +659,7 @@ class TestAlignNwflex:
 class TestScoreAlignment:
     """score_alignment — recompute NW affine-gap score from a CIGAR.
 
-    Soft-clip ``S`` is charged the same affine-gap penalty as a deletion
+    Soft-clip ``S`` is charged the same affine-gap penalty as an insertion
     of the same length; ``N`` and ``H``/``P`` contribute nothing.
     """
 
@@ -693,8 +693,8 @@ class TestScoreAlignment:
         # 2M3D2M with all matches: 4 + (-3 + 3*-1) = -2.
         assert self._score("AAAA", "AACCCAA", "2M3D2M") == -2
 
-    def test_soft_clip_charged_like_deletion(self):
-        # 4M then 3S: 4 + (-3 + 3*-1) = -2.  Same gap cost as 3I/3D.
+    def test_soft_clip_charged_like_insertion(self):
+        # 4M then 3S: 4 + (-3 + 3*-1) = -2.  Same gap cost as 3I.
         assert self._score("AAAACCC", "AAAA", "4M3S") == -2
 
     def test_leading_soft_clip_charged(self):
