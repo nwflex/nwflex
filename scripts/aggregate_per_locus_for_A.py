@@ -5,7 +5,7 @@ holding everything else as the per-locus average.  This script reads
 the raw sweep shards once and writes four small per-locus CSVs that
 the figure builder consumes.
 
-Single-locus side (filtered to motif_len = 2):
+Single-locus side (filtered to motif_len = 3):
   A1_per_pind__delta.csv     one row per (pind, arm, delta)
                               correctness avg over snv=-1, all N, all lflank
   A2_per_pind__lflank.csv    one row per (pind, arm, lflank)
@@ -34,7 +34,7 @@ COMPOUND_SHARDS = REPO_ROOT / "supplement/data_full/compound"
 OUT_DIR = REPO_ROOT / "supplement/data"
 PANEL_PATH = REPO_ROOT / "data/hg38_motif_sample_K100.tsv"
 
-SINGLE_MOTIF_LEN = 2
+SINGLE_MOTIF_LEN = 3
 COMPOUND_L1L2 = (2, 3)
 COMPOUND_N = (10, 10)
 
@@ -100,7 +100,7 @@ def main():
     panel = pd.read_csv(PANEL_PATH, sep="\t")
     di_pinds = set(panel.loc[panel["type"].str.len() == SINGLE_MOTIF_LEN,
                               "pind"].astype(int))
-    print(f"single-locus: {len(di_pinds)} dinucleotide pinds in panel")
+    print(f"single-locus: {len(di_pinds)} pinds with motif_len={SINGLE_MOTIF_LEN} in panel")
 
     # ----- single-locus side --------------------------------------------
     single_files = _filter_single_shards(di_pinds)
