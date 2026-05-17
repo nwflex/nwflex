@@ -19,7 +19,7 @@ simulated haplotypes whose repeat count differs from the reference.
 **BWA-MEM at standard parameters** is mostly wrong on these reads:
 soft-clipping at the boundary consumes part of the flank and the
 repeat length is unmeasured. Under principled scoring (soft-clip
-charged the same affine-gap penalty as a deletion of the same
+charged the same affine-gap penalty as an insertion of the same
 length), the truth-shape alignment strictly outscores the soft-clip,
 so this is a heuristic-miss failure rather than a score-landscape
 one.
@@ -66,7 +66,7 @@ Throughout the notebooks we are careful to distinguish two scores:
 
 - **NW (Needleman-Wunsch / global) score** — affine-gap walked over
   a full CIGAR with soft-clips charged the same affine-gap penalty
-  as a deletion of the same length, computed via `score_alignment`
+  as an insertion of the same length, computed via `score_alignment`
   in `simulation.core`. NW score is well-defined for any CIGAR
   (BWA's output, NW-flex's output, or a constructed truth alignment)
   and matches NW-flex's reported `RefAligner` score by construction

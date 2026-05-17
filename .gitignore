@@ -62,15 +62,13 @@ Thumbs.db
 # pdfs from notebooks
 notebooks/pdfs
 
-# Batch sweep outputs — most artifacts are regenerable from
+# Batch sweep outputs — every CSV and TeX artifact is regenerable from
 # scripts/run_batch_sweep.py + scripts/aggregate_results.py +
-# scripts/aggregate_per_locus_for_A.py + scripts/build_manuscript_figures.py.
+# scripts/aggregate_per_locus_for_A.py + scripts/build_manuscript_figures.py +
+# scripts/build_stats_tables.py.  None of them are tracked.
 #
 # What is tracked from supplement/:
 #   - supplement/figures_priority/*.pdf            (manuscript figures)
-#   - supplement/data/A{1,2,3,4}_per_*.csv          (per-locus inputs for figA)
-#   - supplement/data/single_repeat_cross_locus_aggregate.csv   (fig1, fig2)
-#   - supplement/data_full/compound_cross_locus_aggregate.csv   (fig3, fig4)
 # The LaTeX assemblers (fig1.tex, fig2.tex, fig3.tex, fig4.tex,
 # figA.tex) live in the companion nwflex_TNG repo under tex/, next to
 # main.tex.  Everything else under supplement/ is gitignored below.
@@ -78,17 +76,11 @@ notebooks/pdfs
 # (PNG previews of every figure are already covered by the global
 # *.png rule above.)
 
+*.csv
+*.tex
+
 supplement/data/single_repeat/
 supplement/data/compound/
-supplement/data_full/single_repeat/
-supplement/data_full/compound/
 supplement/figures/
-supplement/figures_full/
-supplement/figures_full_priority/
-supplement/lego_playground.html
-
-# Slim/transposed compound aggregate — superseded by the data_full
-# version that build_manuscript_figures.py actually reads for fig3/fig4.
-supplement/data/compound_cross_locus_aggregate.csv
 
 

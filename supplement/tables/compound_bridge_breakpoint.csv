@@ -1,4 +1,4 @@
 arm,min_M_at_50pct,min_M_at_80pct,min_M_at_95pct,min_M_at_99pct,min_M_at_100pct
-BWA-no-clip,3,3,,,
-BWA-std,3,3,,,
+BWA-no-clip,2,4,,,
+BWA-std,2,3,,,
 NW-flex,1,1,1,1,1

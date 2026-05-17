@@ -1,14 +1,11 @@
-# Small batch (~30 minutes): single-repeat sweep only.
+# Single-repeat sweep — every panel locus × Δ × N × SNV slot.
 #
-# Runs the single-repeat half of the comprehensive sweep — every panel
-# locus × {Δ ∈ [-5, 5]} × {3 reference repeat counts} × {5 SNV slots} —
-# writing one tidy-frame CSV shard per (locus, params) task to
-# supplement/data/single_repeat/. The compound block is vacated so this
-# config does no compound work; pair it with large.yaml for the full
-# (single + compound) supplement build.
+# Writes one tidy-frame CSV shard per (locus, N, snv_offset) task to
+# supplement/data/single_repeat/.  Roughly 6,899 loci × 3 N values
+# × 5 SNV slots ≈ 103,000 shards.
 #
 # Usage:
-#   python scripts/run_batch_sweep.py --config scripts/configs/small.yaml
+#   python scripts/run_batch_sweep.py --config scripts/configs/single_repeat.yaml --workers 56
 
 seed: 20260512
 

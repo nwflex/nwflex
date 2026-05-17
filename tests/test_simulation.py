@@ -29,7 +29,6 @@ from nwflex.simulation import (
     mirror_reads,
     parse_cigar,
     pivot_for_heatmap,
-    plot_correctness_heatmap,
     plot_correctness_heatmap_rows,
     sweep,
     SweepVariant,

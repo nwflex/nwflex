@@ -6,13 +6,10 @@ task runs the same simulation flow the notebooks use
 ``output.data_dir``.  Cross-locus aggregation, figures, and tables are
 produced by sibling scripts.
 
-This file is being built up in steps.  Current step (1): locus +
-motif-pair selection with a ``--dry-run`` mode that prints the
-selection and exits.
-
 Usage::
 
-    python scripts/run_batch_sweep.py --config scripts/configs/main.yaml --dry-run
+    python scripts/run_batch_sweep.py --config scripts/configs/single_repeat.yaml [--dry-run]
+    python scripts/run_batch_sweep.py --config scripts/configs/compound.yaml [--dry-run]
 """
 from __future__ import annotations
 

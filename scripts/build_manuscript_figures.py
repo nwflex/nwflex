@@ -44,7 +44,7 @@ from nwflex.simulation.viz import (
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SINGLE_CSV = REPO_ROOT / "supplement/data/single_repeat_cross_locus_aggregate.csv"
-COMPOUND_CSV_FULL = REPO_ROOT / "supplement/data_full/compound_cross_locus_aggregate.csv"
+COMPOUND_CSV = REPO_ROOT / "supplement/data/compound_cross_locus_aggregate.csv"
 OUT_DIR = REPO_ROOT / "supplement/figures_priority"
 
 ARM_ROWS = ["BWA-std", "BWA-no-clip", "NW-flex"]
@@ -301,7 +301,7 @@ def build_fig2(N_value: int, motif_len: int = SINGLE_MOTIF_LEN):
 
 
 def _load_compound_for_monodi():
-    df = pd.read_csv(COMPOUND_CSV_FULL)
+    df = pd.read_csv(COMPOUND_CSV)
     # (mono, di) and (di, mono) both, at N1=N2=10
     mask = (
         (df["N1"] == 10) & (df["N2"] == 10) &
@@ -367,7 +367,7 @@ def build_fig3():
 
 def build_fig4(M: int):
     """Compound BWA-MEM (no clip) only — motif1_len × motif2_len grid at one |M|."""
-    df = pd.read_csv(COMPOUND_CSV_FULL)
+    df = pd.read_csv(COMPOUND_CSV)
     df = df[(df["arm"] == "BWA-no-clip") &
             (df["bridge_len"] == M) &
             (df["N1"] == 10) & (df["N2"] == 10)]
@@ -456,23 +456,6 @@ def _beta_mom_band(values, weights, q_low=0.16, q_high=0.84):
     return mu, float(np.quantile(samples, q_low)), float(np.quantile(samples, q_high))
 
 
-def _line_pool_by(df: pd.DataFrame, x_col: str) -> pd.DataFrame:
-    """Per (arm, x) cell: weighted mean of fwd+rc correctness, plus a
-    Beta-MOM 16th/84th-percentile band (bounded in [0,1])."""
-    df = df.copy()
-    df["avg"] = 0.5 * (df["frac_score_eq_truth_fwd"]
-                       + df["frac_score_eq_truth_rc"])
-    g = df.groupby(["arm", x_col], dropna=False, sort=True)
-    def _summ(d):
-        mu, lo, hi = _beta_mom_band(d["avg"].values, d["n_loci"].values)
-        return pd.Series({
-            "mean": mu, "low": lo, "high": hi,
-            "n":    d["n_loci"].sum(),
-        })
-    pooled = g.apply(_summ, include_groups=False).reset_index()
-    return pooled
-
-
 def _plot_arm_lines(ax, pooled, x_col, x_label, dodge=0.08,
                      show_legend=True, show_ylabel=True):
     """Line plot of mean correctness per arm with asymmetric capped
@@ -503,66 +486,6 @@ def _plot_arm_lines(ax, pooled, x_col, x_label, dodge=0.08,
     ax.grid(True, linestyle=":", color="#bbbbbb", alpha=0.6)
     if show_legend:
         ax.legend(loc="best", fontsize=12, frameon=True)
-
-
-def build_A1():
-    """Correctness vs Δ, single-locus, no SNV, pooled over N + motif + lflank."""
-    df = pd.read_csv(SINGLE_CSV)
-    df = df[df["snv_offset"] == -1]
-    pooled = _line_pool_by(df, "delta")
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    _plot_arm_lines(ax, pooled, "delta", "Δ (Hap N − Ref N)",
-                    title="Single-locus correctness vs Δ "
-                          "(no SNV; pooled over N, motif, lflank)")
-    ax.axvline(0, color="#888888", linestyle="--", linewidth=0.8)
-    fig.tight_layout()
-    _save(fig, "A1__corr_vs_delta_single_noSNV")
-
-
-def build_A2(delta_fixed: int = -3):
-    """Correctness vs lflank, single-locus, no SNV, at one Δ slice."""
-    df = pd.read_csv(SINGLE_CSV)
-    df = df[(df["snv_offset"] == -1) & (df["delta"] == delta_fixed)]
-    pooled = _line_pool_by(df, "lflank")
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    _plot_arm_lines(ax, pooled, "lflank", "lflank extent (bases)",
-                    title=f"Single-locus correctness vs lflank "
-                          f"(no SNV, Δ = {delta_fixed}; pooled over N, motif)")
-    fig.tight_layout()
-    _save(fig, f"A2__corr_vs_lflank_single_noSNV_delta{delta_fixed:+d}")
-
-
-def build_A3():
-    """Correctness vs SNV offset, single-locus, pooled over N + motif + Δ + lflank."""
-    df = pd.read_csv(SINGLE_CSV)
-    pooled = _line_pool_by(df, "snv_offset")
-    # Order: numeric ascending, then -1 (no SNV) last; remap x for plotting.
-    nums = sorted([s for s in pooled["snv_offset"].unique() if s != -1])
-    order = nums + ([-1] if -1 in pooled["snv_offset"].values else [])
-    order_index = {v: i for i, v in enumerate(order)}
-    pooled = pooled.copy()
-    pooled["x_pos"] = pooled["snv_offset"].map(order_index)
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    for arm in ARM_ROWS:
-        sub = pooled[pooled["arm"] == arm].sort_values("x_pos")
-        x = sub["x_pos"].values
-        m = sub["mean"].values
-        sd = sub["sd"].values
-        c = _ARM_COLORS[arm]
-        ax.plot(x, m, "-o", color=c, label=ARM_LABELS[arm],
-                linewidth=2.0, markersize=5)
-        ax.fill_between(x, m - sd, m + sd, color=c, alpha=0.15, linewidth=0)
-    ax.set_xticks(list(order_index.values()))
-    ax.set_xticklabels([("none" if v == -1 else str(v + 1)) for v in order])
-    ax.set_xlabel("SNV position in left flank (1 = repeat boundary)", fontsize=10)
-    ax.set_ylabel("fraction with score = truth (fwd+rc avg)", fontsize=10)
-    ax.set_ylim(-0.05, 1.05)
-    ax.grid(True, linestyle=":", color="#bbbbbb", alpha=0.7)
-    ax.legend(loc="best", fontsize=9, frameon=True)
-    ax.set_title("Single-locus correctness vs SNV position "
-                 "(pooled over N, motif, Δ, lflank)", fontsize=11)
-    fig.tight_layout()
-    _save(fig, "A3__corr_vs_snv_offset_single")
 
 
 def _per_locus_summary(df: pd.DataFrame, x_col: str,
@@ -644,33 +567,6 @@ def build_A_panels():
         xticks=sorted(A4_pool["bridge_len"].unique()),
         outname="D__bridge", show_legend=True,
     )
-
-
-def build_A4():
-    """Correctness vs |M|, compound, N=10/10, pooled over motif pairs and (Δ1,Δ2)."""
-    df = pd.read_csv(COMPOUND_CSV_FULL)
-    df = df[(df["N1"] == 10) & (df["N2"] == 10)].copy()
-    if df.empty:
-        print("  A4: no compound data at N=10/10 yet")
-        return
-    df["avg"] = 0.5 * (df["frac_score_eq_truth_fwd"]
-                       + df["frac_score_eq_truth_rc"])
-    g = df.groupby(["arm", "bridge_len"], dropna=False, sort=True)
-    pooled = g.apply(
-        lambda d: pd.Series({
-            "mean": (d["avg"] * d["n_loci"]).sum() / d["n_loci"].sum(),
-            "sd":   d["avg"].std(ddof=0),
-            "n":    d["n_loci"].sum(),
-        }),
-        include_groups=False,
-    ).reset_index()
-    fig, ax = plt.subplots(figsize=(7, 4.5))
-    _plot_arm_lines(ax, pooled, "bridge_len", "|M| (bridge length, bp)",
-                    title="Compound correctness vs bridge length "
-                          "(N₁=N₂=10; pooled over motif pairs and Δ₁,Δ₂)")
-    ax.set_xticks(sorted(pooled["bridge_len"].unique()))
-    fig.tight_layout()
-    _save(fig, "A4__corr_vs_bridge_compound")
 
 
 # ---- driver ---------------------------------------------------------------

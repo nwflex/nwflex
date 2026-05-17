@@ -1,19 +1,21 @@
 """
-viz.py — visualizations for the simulation harness.
+Visualizations for the simulation harness.
 
 - :func:`render_zoom` produces a column-aligned ASCII view of one
   alignment around a repeat-zone interval.
 - :func:`project_alignment_to_ref` projects a CIGAR onto reference
   coordinates as a per-position read-base string.
-- :func:`plot_correctness_heatmap` produces the three-panel
-  (Δ × lflank) correct/wrong heatmap used by the validation cells.
+- :func:`plot_correctness_heatmap` and :func:`plot_correctness_heatmap_rows`
+  produce the (Δ × lflank) correct/wrong heatmaps used in the
+  performance comparison.
 """
 
 from __future__ import annotations
 
-from typing import Iterable, List, Mapping, Sequence, Tuple
+from functools import reduce
+from typing import Iterable, Mapping, Sequence, Tuple
 
-from .core import parse_cigar, reverse_complement
+from .core import combine_states, parse_cigar, reverse_complement
 
 
 # Internal sentinels for ``project_alignment_to_ref`` so the resulting
@@ -206,8 +208,8 @@ def render_zoom(
         # H, P, S contribute no columns (S already peeled).
 
     # Choose the visible window: ``pad`` columns of context on each
-    # side of the zone.  When the alignment touches no Z column (rare
-    # for this notebook), show everything.
+    # side of the zone.  When the alignment touches no Z column,
+    # show everything.
     z_cols = [i for i, z in enumerate(cols_zone) if z == "Z"]
     if z_cols:
         a = max(0, z_cols[0] - pad)
@@ -1216,9 +1218,6 @@ def _draw_2d_grid_panel(ax, sub_df, *, deltas1, deltas2,
 def _state_value_fn(combine_across_reads):
     """Return a ``cell_value_fn`` that reduces per-cell states under the
     given policy; returns ``(fwd, rc)`` strings (or ``None`` for empty)."""
-    from functools import reduce
-    from .core import combine_states
-
     def value_fn(cell_df):
         if "fwd_state" in cell_df.columns and "rc_state" in cell_df.columns:
             fwds = [s for s in cell_df["fwd_state"].tolist()

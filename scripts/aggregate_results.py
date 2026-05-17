@@ -19,7 +19,7 @@ Reads ``supplement/data/{single_repeat,compound}/*.csv`` written by
 
 Usage::
 
-    python scripts/aggregate_results.py --config scripts/configs/main.yaml
+    python scripts/aggregate_results.py --config scripts/configs/single_repeat.yaml
 """
 from __future__ import annotations
 

@@ -274,7 +274,7 @@ def _to_dp_convention(score_kwargs: Mapping[str, Any]) -> dict:
     e.g. BWA's ``O + k*E``) and ``go + (L-1)*ge`` under convention B (the
     Gotoh recurrence the DP implements). Shifting ``gap_open`` by ``+ge``
     makes the DP charge the same effective per-gap cost as the convention-A
-    scheme it was handed. See ``scripts/check_gap_conventions.py``.
+    scheme it was handed.
     """
     return {**score_kwargs,
             "gap_open": score_kwargs["gap_open"] + score_kwargs["gap_extend"]}

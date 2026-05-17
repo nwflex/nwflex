@@ -1,6 +1,9 @@
 """
-simulation.py — Simulation harness for notebook 07
-(NW-flex vs BWA-MEM comparison).
+Simulation primitives for the NW-flex vs BWA-MEM performance comparison.
+
+Locus and haplotype construction, read tiling, BWA-MEM and NW-flex
+wrappers, CIGAR decoding, per-arm correctness rules, mirror-frame
+strand handling, and scoring helpers.
 """
 
 from __future__ import annotations
@@ -10,7 +13,7 @@ import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, List, NamedTuple, Optional, Tuple
+from typing import Any, List, Optional, Tuple
 
 from nwflex.repeats import STRLocus
 
@@ -827,12 +830,16 @@ def decode_z_bp(
     z_end : int
         Right edge of the repeat interval (0-based, exclusive).
     convention : {"bwa", "nwflex"}
-        Boundary convention for insertions:
+        Boundary convention for insertions at the left boundary:
 
-        - ``"bwa"`` — an insertion at the left boundary is counted
-          inside the repeat (cursor exactly at ``z_start``).
+        - ``"bwa"`` — an insertion at the left boundary (cursor at
+          ``z_start``) is counted inside the repeat.
         - ``"nwflex"`` — an insertion at the left boundary is counted
           outside the repeat.
+
+        At the right boundary (cursor at ``z_end``), both conventions
+        count the insertion inside the repeat — this is what lets the
+        ``"bwa"`` convention reproduce BWA-MEM's emitted CIGAR shapes.
 
     Returns
     -------
@@ -1050,8 +1057,8 @@ def score_alignment(
 ) -> float:
     """
     Score an alignment described by ``(pos_1based, cigar)`` against
-    ``ref`` and ``read`` under the affine-gap scheme used elsewhere in
-    this notebook (and by ``RefAligner``).
+    ``ref`` and ``read`` under the affine-gap scheme this package
+    and ``RefAligner`` use.
 
     This is a strict Needleman-Wunsch global score: every CIGAR op
     contributes, with no edge bonuses or position-dependent
@@ -1062,7 +1069,6 @@ def score_alignment(
     M→gap transition charges ``gap_open``, each extend charges
     ``gap_extend``).  The two agree on gapless CIGARs (M/N only) and
     diverge by one ``gap_extend`` per I/D/S run otherwise.  See
-    ``scripts/check_gap_conventions.py`` and
     ``nwflex.simulation.sweep._to_dp_convention`` for the bridge.
 
     Because :func:`align_nwflex` runs the DP semiglobally

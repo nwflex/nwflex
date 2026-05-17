@@ -30,7 +30,7 @@ import pandas as pd
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SINGLE_SHARDS = REPO_ROOT / "supplement/data/single_repeat"
-COMPOUND_SHARDS = REPO_ROOT / "supplement/data_full/compound"
+COMPOUND_SHARDS = REPO_ROOT / "supplement/data/compound"
 OUT_DIR = REPO_ROOT / "supplement/data"
 PANEL_PATH = REPO_ROOT / "data/hg38_motif_sample_K100.tsv"
 
@@ -39,22 +39,15 @@ COMPOUND_L1L2 = (2, 3)
 COMPOUND_N = (10, 10)
 
 
-def _di_pinds() -> set[int]:
-    """Set of pind values for dinucleotide loci."""
-    panel = pd.read_csv(PANEL_PATH, sep="\t")
-    return set(panel.loc[panel["type"].str.len() == SINGLE_MOTIF_LEN,
-                          "pind"].astype(int))
-
-
-def _filter_single_shards(di_pinds: set[int]) -> list[str]:
-    """Shard files whose pind is in the di set."""
+def _filter_single_shards(target_pinds: set[int]) -> list[str]:
+    """Shard files whose pind is in the target set."""
     files = sorted(glob.glob(str(SINGLE_SHARDS / "*.csv")))
     keep = []
     for f in files:
         # filename pattern: pind{ddddd}__N{NN}__SNV{+d}.csv
         name = Path(f).stem
         pind = int(name.split("__")[0].replace("pind", ""))
-        if pind in di_pinds:
+        if pind in target_pinds:
             keep.append(f)
     return keep
 
@@ -98,12 +91,12 @@ def _read_concat(files, usecols, label):
 def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     panel = pd.read_csv(PANEL_PATH, sep="\t")
-    di_pinds = set(panel.loc[panel["type"].str.len() == SINGLE_MOTIF_LEN,
-                              "pind"].astype(int))
-    print(f"single-locus: {len(di_pinds)} pinds with motif_len={SINGLE_MOTIF_LEN} in panel")
+    target_pinds = set(panel.loc[panel["type"].str.len() == SINGLE_MOTIF_LEN,
+                                  "pind"].astype(int))
+    print(f"single-locus: {len(target_pinds)} pinds with motif_len={SINGLE_MOTIF_LEN} in panel")
 
     # ----- single-locus side --------------------------------------------
-    single_files = _filter_single_shards(di_pinds)
+    single_files = _filter_single_shards(target_pinds)
     print(f"single-locus: reading {len(single_files)} shards "
           f"(filtered from full set)...", flush=True)
     usecols = ["pind", "N", "snv_offset", "arm", "delta", "lflank", "state"]

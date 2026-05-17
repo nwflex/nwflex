@@ -25,7 +25,7 @@ the deliberate motif-length view.
 
 Usage::
 
-    python scripts/build_stats_tables.py --config scripts/configs/main.yaml
+    python scripts/build_stats_tables.py --config scripts/configs/single_repeat.yaml
 """
 from __future__ import annotations
 
