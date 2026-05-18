@@ -403,13 +403,6 @@ landed.
 
 ### Other deferred items
 
-- **Heatmap function consolidation.**  `nwflex/simulation/viz.py`
-  carries four `plot_correctness_heatmap*` variants and a parallel
-  four `plot_proportion_heatmap*` set, differing on inner-panel axes
-  (1D vs 2D) and outer stratifier (single row vs multi-row stack).
-  A unified API with a `panel_kind` switch and an optional outer
-  stratifier could collapse the eight to two or three functions.
-  Medium-effort refactor; numerical/visual output must stay identical.
 - **NB7 `## Diagnostic — non-length-correct cells`.**  The plan
   described a diagnostic cell that walks every NW-flex non-length-
   correct cell and displays the chosen vs. truth CIGARs side by side.
@@ -417,3 +410,37 @@ landed.
 - **NB8 per-read verdict table + SW-vs-NW worked example.**  NB7 has
   these; NB8 forwards to NB7 for the SW-vs-NW arithmetic.  A compound
   worked example would round out NB8.
+- **NB7 / NB8 execution-count cleanup.**  Both notebooks have
+  non-contiguous code-cell execution counts (NB7: `..., 18, 25, 20,
+  26`; NB8: `..., 17, 23, 19`) left over from rerunning individual
+  cells rather than _Kernel → Restart Kernel and Run All Cells_.
+  Outputs are fresh and the supplement PDF builds either way, but the
+  numbering will read odd to a careful reader.  Resolve before the
+  next supplement-PDF build.
+- **`scripts/sweep_viz.py` shim.**  After the heatmap consolidation
+  the 1D-proportion plotters live in `nwflex.simulation.viz`; this
+  file is now a thin re-export shim kept so existing `from sweep_viz
+  import …` callers (`scripts/aggregate_results.py`) keep working.
+  Optional: migrate the callers to import from `nwflex.simulation`
+  directly and delete the shim.
+
+### Completed during the code-review pass
+
+- **Pre-merge code review** across notebooks, package code, scripts,
+  and supplement.  Four parallel reviewers; structured findings;
+  ~50 items triaged into Critical / Important / Minor and worked.
+- **Heatmap function consolidation** — body duplication across the
+  eight `plot_*_heatmap*` variants collapsed via shared internal
+  helpers; public API unchanged; 11 representative renderings are
+  byte-identical before / after; commit `aee0867`.
+- **Data consolidation.** Retired the slim / `data_full/`
+  bifurcation; everything lives under one canonical
+  `supplement/data/` tree, fed by a pair of YAML configs
+  (`single_repeat.yaml`, `compound.yaml`).
+- **Stats-table writer.**  Underscore-escaping in column headers and
+  integer formatting for count columns, so the emitted `.tex` files
+  compile cleanly without `\usepackage{underscore}` and read as
+  `5420` rather than `5420.000`.
+- **CSV / TeX artifacts** untracked from the repo (`.gitignore` now
+  carries the globs); every regenerable artifact is produced by the
+  pipeline scripts on demand.
