@@ -264,6 +264,9 @@ The `notebooks/` directory contains a pedagogical series explaining NW-flex from
 | `04_NWflex_STR.ipynb` | Application to Short Tandem Repeat alignment |
 | `05_NWflex_Cython.ipynb` | Cython acceleration and performance |
 | `06_NWflex_STR_locus.ipynb` | Simulating reads from STR loci and phase-aware alignment |
+| `07_NWflex_BWA_Comparison.ipynb` | NW-flex vs BWA-MEM on simulated reads from real STR loci: length sweep and single-SNV comparison |
+| `08_NWflex_Compound.ipynb` | NW-flex vs BWA-MEM on compound-repeat loci: $(\Delta_1, \Delta_2)$ sweep with a bridge of length $\lvert M \rvert$ |
+| `Appendix_TRF.ipynb` | TRF panel construction: parsing, isolation/purity filtering, and reproduction of `data/hg38_motif_sample_K100.tsv` |
 
 A merged PDF can be generated with the command 
 ```bash
@@ -280,6 +283,7 @@ cd notebooks && ./build_pdf.sh
 | `fast.py` | Cython wrapper:<br> `run_flex_dp_fast()`, `DPBuffers` |
 | `repeats.py` | STR utilities:<br> `phase_repeat`, `STRLocus`, `CompoundSTRLocus` |
 | `validation.py` | Baseline implementations for testing:<br> `nwg_global`, `sflex_naive` |
+| `simulation/` | Simulation harness for the NW-flex vs BWA-MEM performance comparison.<br>`simulation.core` — locus/haplotype construction, read tiling, BWA-MEM and NW-flex wrappers, CIGAR decoding, per-arm correctness, mirror-frame strand handling, scoring helpers.<br>`simulation.viz` — ASCII and matplotlib alignment visualizations.<br>`simulation.sweep` — parametric sweep harness with method classes for BWA-MEM and NW-flex (single and compound repeats). |
 
 ## Testing
 
@@ -321,9 +325,11 @@ nwflex/
 │   ├── fast.py        # Cython interface
 │   ├── repeats.py     # STR utilities
 │   ├── plot/          # Visualization subpackage
+│   ├── simulation/    # NW-flex vs BWA-MEM simulation harness
 │   └── _cython/       # Cython source
-├── notebooks/         # Educational notebooks
-├── scripts/           # Figure generation scripts
+├── notebooks/         # Educational + manuscript notebooks
+├── scripts/           # Sweep coordinator, aggregators, figure + table builders
+├── supplement/        # Sweep shards, aggregate CSVs, manuscript figures and tables
 └── tests/             # pytest test suite
 ```
 

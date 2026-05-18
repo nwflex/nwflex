@@ -70,8 +70,22 @@ def _write_table(df: pd.DataFrame, out_dir: Path, name: str,
     csv_path = out_dir / f"{name}.csv"
     tex_path = out_dir / f"{name}.tex"
     df.to_csv(csv_path, index=False)
+    # Escape underscores in column names so they don't trigger
+    # "Missing $ inserted" in LaTeX text mode.  ``escape=False`` is
+    # kept so captions and labels (which contain ``$``, ``\Delta``,
+    # and already-escaped ``\_``) pass through unchanged.  Float
+    # columns whose non-null values are all integers get cast to
+    # ``Int64`` so counts render as ``5420`` not ``5420.000``.
+    df_tex = df.copy()
+    for col in df_tex.columns:
+        s = df_tex[col]
+        if s.dtype == "float64":
+            non_null = s.dropna()
+            if not non_null.empty and (non_null == non_null.astype(int)).all():
+                df_tex[col] = s.astype("Int64")
+    df_tex = df_tex.rename(columns=lambda c: c.replace("_", r"\_"))
     with tex_path.open("w") as f:
-        f.write(df.to_latex(
+        f.write(df_tex.to_latex(
             index=False,
             float_format=float_format,
             caption=caption,
@@ -346,7 +360,8 @@ def main() -> None:
     _write_table(
         recovery, tables_dir, "compound_recovery_by_bridge",
         caption=("Compound cross-locus recovery, per arm and bridge "
-                 "length: mean and quartile fractions of loci with "
+                 "length, pooled across motif-length pairs and "
+                 "N-pairs: mean and quartile fractions of loci with "
                  "score equal to truth, and the fraction of cells "
                  "reaching 95\\% / 100\\% agreement."),
         label="tab:compound-recovery-by-bridge",
@@ -386,9 +401,13 @@ def main() -> None:
         per_locus_compound, tables_dir, "compound_per_locus_distribution",
         caption=("Per-locus distribution of the fraction of "
                  "$(\\Delta_1, \\Delta_2)$ cells where score equals "
-                 "truth, taken across motif-pair loci.  "
-                 "``frac\\_loci\\_at\\_*`` answers \"what fraction of "
-                 "loci hit at least this success rate?\""),
+                 "truth, taken across motif-pair loci.  The "
+                 "``frac\\_loci\\_at\\_*`` columns "
+                 "(``frac\\_loci\\_at\\_100pct``, "
+                 "``frac\\_loci\\_at\\_95pct``, "
+                 "``frac\\_loci\\_at\\_50pct``) answer "
+                 "\"what fraction of loci hit at least this success "
+                 "rate?\""),
         label="tab:compound-per-locus-distribution",
     )
 
@@ -458,9 +477,13 @@ def _maybe_single(sr_df, tables_dir: Path) -> None:
         sr_per_locus, tables_dir, "single_per_locus_distribution",
         caption=("Per-locus distribution of the fraction of "
                  "$(\\Delta, \\text{lflank})$ cells where score equals "
-                 "truth, across selected loci.  ``frac\\_loci\\_at\\_*"
-                 "`` answers \"what fraction of loci hit at least this "
-                 "success rate?\"  Trinucleotide (3-mer) loci only."),
+                 "truth, across selected loci.  The "
+                 "``frac\\_loci\\_at\\_*`` columns "
+                 "(``frac\\_loci\\_at\\_100pct``, "
+                 "``frac\\_loci\\_at\\_95pct``, "
+                 "``frac\\_loci\\_at\\_50pct``) answer "
+                 "\"what fraction of loci hit at least this success "
+                 "rate?\"  Trinucleotide (3-mer) loci only."),
         label="tab:single-per-locus-distribution",
     )
 

@@ -30,6 +30,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import yaml
 from matplotlib.cm import ScalarMappable
 from matplotlib.colors import Normalize
 from matplotlib.patches import Circle, Patch, Rectangle
@@ -43,9 +44,11 @@ from nwflex.simulation.viz import (
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# Defaults; the data-side paths get overridden in ``main`` via ``--config``.
 SINGLE_CSV = REPO_ROOT / "supplement/data/single_repeat_cross_locus_aggregate.csv"
 COMPOUND_CSV = REPO_ROOT / "supplement/data/compound_cross_locus_aggregate.csv"
-OUT_DIR = REPO_ROOT / "supplement/figures_priority"
+OUT_DIR = REPO_ROOT / "supplement/figures_priority"  # manuscript-figure tree, not config-driven
+DEFAULT_CONFIG = REPO_ROOT / "scripts/configs/single_repeat.yaml"
 
 ARM_ROWS = ["BWA-std", "BWA-no-clip", "NW-flex"]
 ARM_LABELS = {
@@ -572,10 +575,26 @@ def build_A_panels():
 # ---- driver ---------------------------------------------------------------
 
 def main():
+    global SINGLE_CSV, COMPOUND_CSV
+    global A1_PER_LOCUS_CSV, A2_PER_LOCUS_CSV, A3_PER_LOCUS_CSV, A4_PER_LOCUS_CSV
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--config", type=Path, default=DEFAULT_CONFIG,
+        help="YAML config; reads output.data_dir.",
+    )
     parser.add_argument("--figs", nargs="+", default=["all"],
                         help="Subset: 1, 2, 3, 4, or 'all'.")
     args = parser.parse_args()
+    with open(args.config) as f:
+        cfg = yaml.safe_load(f)
+    data_dir = (REPO_ROOT / cfg["output"]["data_dir"]).resolve()
+    SINGLE_CSV = data_dir / "single_repeat_cross_locus_aggregate.csv"
+    COMPOUND_CSV = data_dir / "compound_cross_locus_aggregate.csv"
+    A1_PER_LOCUS_CSV = data_dir / "A1_per_pind__delta.csv"
+    A2_PER_LOCUS_CSV = data_dir / "A2_per_pind__lflank.csv"
+    A3_PER_LOCUS_CSV = data_dir / "A3_per_pind__snv.csv"
+    A4_PER_LOCUS_CSV = data_dir / "A4_per_pair__bridge.csv"
+
     selected = set(args.figs)
     do_all = "all" in selected
 

@@ -21,18 +21,22 @@ Each row's ``correct`` column is in [0, 1].
 """
 from __future__ import annotations
 
+import argparse
 import glob
 import time
 from pathlib import Path
 
 import pandas as pd
+import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+# Defaults; overridden in ``main`` via ``--config``.
 SINGLE_SHARDS = REPO_ROOT / "supplement/data/single_repeat"
 COMPOUND_SHARDS = REPO_ROOT / "supplement/data/compound"
 OUT_DIR = REPO_ROOT / "supplement/data"
 PANEL_PATH = REPO_ROOT / "data/hg38_motif_sample_K100.tsv"
+DEFAULT_CONFIG = REPO_ROOT / "scripts/configs/single_repeat.yaml"
 
 SINGLE_MOTIF_LEN = 3
 COMPOUND_L1L2 = (2, 3)
@@ -89,6 +93,23 @@ def _read_concat(files, usecols, label):
 
 
 def main():
+    global SINGLE_SHARDS, COMPOUND_SHARDS, OUT_DIR, PANEL_PATH
+    parser = argparse.ArgumentParser(
+        description="Per-locus aggregates for the A__aggregate_4panel figure."
+    )
+    parser.add_argument(
+        "--config", type=Path, default=DEFAULT_CONFIG,
+        help="YAML config; reads output.data_dir and panel keys.",
+    )
+    args = parser.parse_args()
+    with open(args.config) as f:
+        cfg = yaml.safe_load(f)
+    data_dir = (REPO_ROOT / cfg["output"]["data_dir"]).resolve()
+    SINGLE_SHARDS = data_dir / "single_repeat"
+    COMPOUND_SHARDS = data_dir / "compound"
+    OUT_DIR = data_dir
+    PANEL_PATH = (REPO_ROOT / cfg["panel"]).resolve()
+
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     panel = pd.read_csv(PANEL_PATH, sep="\t")
     target_pinds = set(panel.loc[panel["type"].str.len() == SINGLE_MOTIF_LEN,

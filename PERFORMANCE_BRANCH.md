@@ -314,8 +314,8 @@ to run, not for any one area to be finished first.
       `rc_to_forward_alignment`
 - [x] Scoring helpers — `score_alignment`; `bwa_truth_cigar`,
       `nwflex_truth_cigar`
-- [x] Verdict helpers — `alignment_state`,
-      `bwa_state_both_strands`, `bwa_verdict_both_strands`
+- [x] Verdict helpers — `alignment_state`, `alignment_state_multi`,
+      `combine_states`, `state_to_glyph`
 - [x] Visualization — `render_zoom`, `plot_correctness_heatmap`
 - [x] Mirror frame — `build_mirror_frame`
 - [x] Compound-repeat helpers (`CompoundLocus`, multi-block EP,
@@ -346,3 +346,74 @@ to run, not for any one area to be finished first.
 **Later**
 - [x] Appendix notebook documenting TRF and panel construction
       (`Appendix_TRF.ipynb` exists; polish deferred)
+
+## Deferred follow-up work
+
+These items came out of the pre-merge code review but were scoped out
+of this PR.  Listed here so the next pass has a starting point.
+
+### Compound pipeline test coverage
+
+The single-zone code in `nwflex/simulation/` is well-covered
+(`tests/test_simulation.py`, 139 tests).  The compound pipeline ships
+with one test class (`TestIsArmCorrectMulti`) and is otherwise
+untested.  A focused follow-up should mirror the single-zone coverage
+for the compound surface.
+
+Three tiers, in priority order:
+
+**Tier 1 — Construction & invariants** (cheap, high-value; mirror
+existing single-zone tests, each 20-60 lines, no real aligner needed):
+- `TestBuildCompoundLocus` — verify `CompoundLocus` and
+  `build_compound_locus_from_panel`: flank lengths, bridge insertion
+  offset, ref sequence is $A \cdot R_1^{N_1} \cdot M \cdot R_2^{N_2}
+  \cdot B$, zone1 / zone2 endpoints, motif lengths.
+- `TestBuildCompoundHaplotype` — verify `build_compound_haplotype`
+  varies both repeat counts independently, produces correct
+  `hap_z1` / `hap_z2` intervals, total length matches the closed-form.
+- `TestBuildCompoundMirrorFrame` — verify the RC handling swaps zone
+  order, preserves the bridge as its own RC, and produces matching
+  read mirroring.
+- `TestAlignmentStateMulti` — P/T/M/D classification on multi-zone
+  alignments, especially the case where one zone is correct and the
+  other is not.
+
+**Tier 2 — Round-trip / scoring correctness** (catches scoring drift):
+- `TestBwaCompoundTruthCigar` — build a known compound truth CIGAR,
+  rescore it with `score_alignment`, verify the score matches a
+  cell-by-cell tally.  Cover zero-delta, single-block delta, and
+  both-block delta.
+- `TestNwflexCompoundTruthCigar` — same for the NW-flex truth path;
+  confirm the EP-pattern path scores to the truth.
+
+**Tier 3 — Sweep harness on compound** (mock-based, mirrors
+`TestSweep`):
+- `TestSweepCompound` — mock the alignment to return a known hit,
+  verify `BWACompoundMethod.classify` and
+  `NWFlexCompoundMethod.classify` produce the expected state.
+- (Optional) `TestWrapMethodsForMultizoneTruth` — verify the helper
+  composes a multi-zone method out of single-zone methods.
+
+**Scope estimate**: Tier 1 ≈ 250 lines / 12 tests; Tier 2 ≈ 120 lines
+/ 5 tests; Tier 3 ≈ 100 lines / 6 tests.  Total ≈ 470 lines, ≈ 23
+tests.  Tiers 1 and 2 are the priority pair — the compound
+construction and scoring is where the back-and-forth in commit
+`6dbec36` ("fixed reverse complement errors in compound alignment")
+landed.
+
+### Other deferred items
+
+- **Heatmap function consolidation.**  `nwflex/simulation/viz.py`
+  carries four `plot_correctness_heatmap*` variants and a parallel
+  four `plot_proportion_heatmap*` set, differing on inner-panel axes
+  (1D vs 2D) and outer stratifier (single row vs multi-row stack).
+  A unified API with a `panel_kind` switch and an optional outer
+  stratifier could collapse the eight to two or three functions.
+  Medium-effort refactor; numerical/visual output must stay identical.
+- **NB7 `## Diagnostic — non-length-correct cells`.**  The plan
+  described a diagnostic cell that walks every NW-flex non-length-
+  correct cell and displays the chosen vs. truth CIGARs side by side.
+  Not added in this PR.
+- **NB8 per-read verdict table + SW-vs-NW worked example.**  NB7 has
+  these; NB8 forwards to NB7 for the SW-vs-NW arithmetic.  A compound
+  worked example would round out NB8.

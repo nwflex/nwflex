@@ -80,16 +80,6 @@ _ARM_TITLES = {
 }
 
 
-# Manuscript-priority figure names (without extension).  After the full
-# aggregate run writes every figure to ``figures_dir``, these are
-# duplicated into the sibling ``<figures_dir>_priority`` folder so they
-# are easy to find amongst the ~60 alternative stratifications.
-_PRIORITY_FIGURE_NAMES = [
-    "compound__all_loci__bridge_stack",
-    "compound__N10_10__M3__motifLpair_stack",
-]
-
-
 def _compound_proportion_per_npair(
     df: pd.DataFrame, figures_dir: Path,
 ) -> None:
@@ -408,24 +398,6 @@ def main() -> None:
         _compound_tidy_aggregate(cmp_df, data_dir)
     if sr_df is not None:
         _single_repeat_tidy_aggregate(sr_df, data_dir)
-
-    priority_dir = figures_dir.parent / (figures_dir.name + "_priority")
-    _copy_priority_figures(figures_dir, priority_dir)
-
-
-def _copy_priority_figures(
-    figures_dir: Path, priority_dir: Path,
-) -> None:
-    import shutil
-    priority_dir.mkdir(parents=True, exist_ok=True)
-    n = 0
-    for name in _PRIORITY_FIGURE_NAMES:
-        for ext in ("png", "pdf"):
-            src = figures_dir / f"{name}.{ext}"
-            if src.exists():
-                shutil.copy2(src, priority_dir / src.name)
-                n += 1
-    print(f"\nCopied {n} priority files to {priority_dir}")
 
 
 if __name__ == "__main__":
