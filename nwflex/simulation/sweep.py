@@ -148,6 +148,7 @@ def sweep(variants: Iterable[SweepVariant],
                     rows.append({
                         **v.label,
                         "lflank": r.lflank_extent,
+                        "rflank": r.rflank_extent,
                         "method": m.name,
                         "orient": orient,
                         "state":  state,

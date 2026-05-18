@@ -1,0 +1,43 @@
+# Single-repeat resweep — full informative lflank range, N=10 only,
+# SNV slots 1/2/5/10 (1-indexed) plus the no-SNV baseline.
+#
+# Purpose: provide the underlying data for a coverage-weighted
+# "fraction correct" proportion that sums over every read position
+# where both flanks are non-zero (rather than just lflank ∈ {1..10}).
+#
+# Shards land in ``supplement/data_full_lflank/single_repeat/`` so they
+# don't collide with the existing 10-lflank-restricted shards.
+#
+# Usage:
+#   python scripts/run_batch_sweep.py \
+#     --config scripts/configs/single_repeat_full_lflank.yaml --workers 56
+
+seed: 20260512
+
+panel: data/hg38_motif_sample_K100.tsv
+
+single_repeat:
+  motif_lengths: [1, 2, 3]
+  loci_per_length: 6000       # exceeds every per-length pool -> all loci
+  N_values: [10]
+  delta_range: [-5, 5]
+  snv_positions: [null, 0, 1, 4, 9]   # null = no SNV; 1-indexed: 1, 2, 5, 10
+  read_len: 150
+  k_min_flank: 1
+  target_lflanks: null        # null -> full range; reads carry their own
+                              # lflank/rflank for downstream filtering
+
+compound:
+  motif_length_pairs: []
+  pairs_per_length_pair: 0
+  N_pairs: []
+  bridge_lengths: []
+  delta1_range: [-5, 5]
+  delta2_range: [-5, 5]
+  read_len: 150
+  k_min_flank: 1
+
+output:
+  data_dir: supplement/data_full_lflank
+  figures_dir: supplement/figures_full_lflank
+  tables_dir: supplement/tables_full_lflank
