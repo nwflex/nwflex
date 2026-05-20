@@ -50,6 +50,9 @@ NOTEBOOKS=(
     "04_NWflex_STR.ipynb"
     "05_NWflex_Cython.ipynb"
     "06_NWflex_STR_locus.ipynb"
+    "07_NWflex_BWA_Comparison.ipynb"
+    "08_NWflex_Compound.ipynb"
+    "Appendix_TRF.ipynb"
 )
 OUTPUT_DIR="pdfs"
 MERGED_NOTEBOOK="NW-flex_Notebook_Supplement.ipynb"

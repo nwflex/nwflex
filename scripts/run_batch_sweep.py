@@ -6,13 +6,10 @@ task runs the same simulation flow the notebooks use
 ``output.data_dir``.  Cross-locus aggregation, figures, and tables are
 produced by sibling scripts.
 
-This file is being built up in steps.  Current step (1): locus +
-motif-pair selection with a ``--dry-run`` mode that prints the
-selection and exits.
-
 Usage::
 
-    python scripts/run_batch_sweep.py --config scripts/configs/main.yaml --dry-run
+    python scripts/run_batch_sweep.py --config scripts/configs/single_repeat.yaml [--dry-run]
+    python scripts/run_batch_sweep.py --config scripts/configs/compound.yaml [--dry-run]
 """
 from __future__ import annotations
 
@@ -77,7 +74,7 @@ def run_single_repeat_task(
     delta_max: int,
     read_len: int,
     k_min_flank: int,
-    target_lflanks: Sequence[int],
+    target_lflanks: Optional[Sequence[int]],
     score_kwargs: Mapping[str, Any],
     flank_len: int = 200,
     nwflex_factor: int = 3,
@@ -142,7 +139,7 @@ def run_single_repeat_task(
             )
 
     variants = []
-    target_set = set(target_lflanks)
+    target_set = None if target_lflanks is None else set(target_lflanks)
     for delta in range(delta_min, delta_max + 1):
         if locus.N + delta < 0:
             continue
@@ -500,6 +497,10 @@ def _run_one_task(
     """
     sweep_cfg = config[task["kind"]]
     if task["kind"] == "single_repeat":
+        # ``target_lflanks: null`` (or missing) means "sweep the full
+        # informative lflank range" — reads carry their own lflank/rflank
+        # extents so downstream code can filter to both-flanks-positive.
+        tl = sweep_cfg.get("target_lflanks", list(range(1, 11)))
         return run_single_repeat_task(
             pind=int(task["pind"]),
             motif=task["motif"],
@@ -511,7 +512,7 @@ def _run_one_task(
             delta_max=sweep_cfg["delta_range"][1],
             read_len=sweep_cfg["read_len"],
             k_min_flank=sweep_cfg["k_min_flank"],
-            target_lflanks=list(range(1, 11)),
+            target_lflanks=tl,
             score_kwargs=score_kw,
         )
     if task["kind"] == "compound":

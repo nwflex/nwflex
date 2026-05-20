@@ -1,19 +1,21 @@
 """
-viz.py — visualizations for the simulation harness.
+Visualizations for the simulation harness.
 
 - :func:`render_zoom` produces a column-aligned ASCII view of one
   alignment around a repeat-zone interval.
 - :func:`project_alignment_to_ref` projects a CIGAR onto reference
   coordinates as a per-position read-base string.
-- :func:`plot_correctness_heatmap` produces the three-panel
-  (Δ × lflank) correct/wrong heatmap used by the validation cells.
+- :func:`plot_correctness_heatmap` and :func:`plot_correctness_heatmap_rows`
+  produce the (Δ × lflank) correct/wrong heatmaps used in the
+  performance comparison.
 """
 
 from __future__ import annotations
 
-from typing import Iterable, List, Mapping, Sequence, Tuple
+from functools import reduce
+from typing import Iterable, Mapping, Sequence, Tuple
 
-from .core import parse_cigar, reverse_complement
+from .core import combine_states, parse_cigar, reverse_complement
 
 
 # Internal sentinels for ``project_alignment_to_ref`` so the resulting
@@ -206,8 +208,8 @@ def render_zoom(
         # H, P, S contribute no columns (S already peeled).
 
     # Choose the visible window: ``pad`` columns of context on each
-    # side of the zone.  When the alignment touches no Z column (rare
-    # for this notebook), show everything.
+    # side of the zone.  When the alignment touches no Z column,
+    # show everything.
     z_cols = [i for i, z in enumerate(cols_zone) if z == "Z"]
     if z_cols:
         a = max(0, z_cols[0] - pad)
@@ -611,9 +613,10 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
     if snv is not None:
         off = int(snv.get("offset_from_boundary", 2))
         snv_bar_w = 0.18
-        # Position the bar so the grey gap to the repeat boundary equals
-        # the bar's own width.
-        snv_bar_x = flank_w - snv_bar_w - snv_bar_w
+        # Place the bar `off` bar-widths into the left flank from the
+        # repeat boundary so the visual distance scales with the SNV
+        # offset parameter.
+        snv_bar_x = flank_w - off * snv_bar_w - snv_bar_w
         snv_x = snv_bar_x + snv_bar_w / 2
 
         # Bar on the haplotype.
@@ -716,6 +719,97 @@ def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
         spine.set_visible(False)
 
 
+def _format_grid_axes(ax, *, xs, ys, fontsize, highlight_zero_x=True,
+                      highlight_zero_y=False):
+    """Apply the shared (delta × <y-axis>) grid styling to ``ax``.
+
+    Major ticks at ``xs``/``ys``, minor ticks at the cell boundaries,
+    light grey grid lines, square aspect, dark spines.  Optionally
+    overlays a 1.5 pt black rectangle highlighting the column at x=0
+    (and/or the row at y=0) — the Δ=0 "no-change" reference.
+    """
+    import numpy as np
+    from matplotlib.patches import Rectangle
+
+    ax.set_xlim(xs[0] - 0.5, xs[-1] + 0.5)
+    ax.set_ylim(ys[0] - 0.5, ys[-1] + 0.5)
+    ax.set_aspect("equal")
+    ax.set_xticks(xs)
+    ax.set_yticks(ys)
+    ax.set_xticks(np.array(xs, dtype=float) - 0.5, minor=True)
+    ax.set_yticks(np.array(ys, dtype=float) - 0.5, minor=True)
+    ax.grid(which="minor", color="#bbbbbb", linewidth=0.5)
+    ax.tick_params(which="major", labelsize=fontsize, colors="#222222")
+    ax.tick_params(which="minor", length=0)
+    for spine in ax.spines.values():
+        spine.set_color("black")
+        spine.set_linewidth(1.0)
+    if highlight_zero_x and 0 in xs:
+        ax.add_patch(Rectangle(
+            (-0.5, ys[0] - 0.5),
+            1, ys[-1] - ys[0] + 1,
+            fill=False, edgecolor="black", linewidth=1.5, zorder=5,
+        ))
+    if highlight_zero_y and 0 in ys:
+        ax.add_patch(Rectangle(
+            (xs[0] - 0.5, -0.5),
+            xs[-1] - xs[0] + 1, 1,
+            fill=False, edgecolor="black", linewidth=1.5, zorder=5,
+        ))
+
+
+def _draw_glyphs(ax, *, xs, ys, fwd_at, rc_at, color_of):
+    """Lay down fwd Rectangle + rc Circle at each (x, y) cell.
+
+    ``fwd_at(xi, yi)`` and ``rc_at(xi, yi)`` return the per-strand
+    value at index ``(xi, yi)`` into ``xs``/``ys``; ``color_of(value)``
+    maps the value to a fill color.
+    """
+    from matplotlib.patches import Circle, Rectangle
+
+    for yi, Y in enumerate(ys):
+        for xi, X in enumerate(xs):
+            ax.add_patch(Rectangle(
+                (X - 0.5, Y - 0.5), 1, 1,
+                facecolor=color_of(fwd_at(xi, yi)),
+                edgecolor="none", linewidth=0,
+            ))
+            ax.add_patch(Circle(
+                (X, Y), 0.26,
+                facecolor=color_of(rc_at(xi, yi)),
+                edgecolor="#222222", linewidth=0.6,
+                zorder=4,
+            ))
+
+
+def _draw_1d_grid_panel(ax, sub_df, *, deltas, lflanks,
+                        cell_value_fn, color_fn, fontsize):
+    """Draw one ``(Δ × lflank)`` panel using a pluggable cell-value
+    function — the 1-D analogue of :func:`_draw_2d_grid_panel`.
+
+    Iteration order matches the 2-D version (outer X, inner Y), so a
+    cross-cell aggregator passed in via ``cell_value_fn`` sees the same
+    ordering as the panel rendering.
+    """
+    from matplotlib.patches import Circle, Rectangle
+
+    for L in lflanks:
+        for D in deltas:
+            cell = sub_df[(sub_df["delta"] == D) & (sub_df["lflank"] == L)]
+            fwd_v, rc_v = cell_value_fn(cell)
+            ax.add_patch(Rectangle(
+                (D - 0.5, L - 0.5), 1, 1,
+                facecolor=color_fn(fwd_v), edgecolor="none", linewidth=0,
+            ))
+            ax.add_patch(Circle(
+                (D, L), 0.26,
+                facecolor=color_fn(rc_v),
+                edgecolor="#222222", linewidth=0.6, zorder=4,
+            ))
+
+    _format_grid_axes(ax, xs=deltas, ys=lflanks, fontsize=fontsize)
+
+
 def _draw_state_panel(ax, sub_df, *, deltas, lflanks, color_of, fontsize):
     """Draw one (delta × lflank) panel into ``ax``.
 
@@ -727,9 +821,6 @@ def _draw_state_panel(ax, sub_df, *, deltas, lflanks, color_of, fontsize):
     either ``fwd_state`` + ``rc_state``, or a single ``state`` column
     (in which case both shapes share that state).
     """
-    import numpy as np
-    from matplotlib.patches import Circle, Rectangle
-
     has_per_strand = "fwd_state" in sub_df.columns and "rc_state" in sub_df.columns
     if has_per_strand:
         fwd_grid = sub_df.pivot(index="lflank", columns="delta", values="fwd_state")
@@ -740,45 +831,21 @@ def _draw_state_panel(ax, sub_df, *, deltas, lflanks, color_of, fontsize):
     fwd_grid = fwd_grid.reindex(index=lflanks, columns=deltas)
     rc_grid  = rc_grid.reindex(index=lflanks, columns=deltas)
 
-    for li, L in enumerate(lflanks):
-        for di, D in enumerate(deltas):
-            ax.add_patch(Rectangle(
-                (D - 0.5, L - 0.5), 1, 1,
-                facecolor=color_of(fwd_grid.iat[li, di]),
-                edgecolor="none", linewidth=0,
-            ))
-            ax.add_patch(Circle(
-                (D, L), 0.26,
-                facecolor=color_of(rc_grid.iat[li, di]),
-                edgecolor="#222222", linewidth=0.6,
-                zorder=4,
-            ))
-
-    ax.set_xlim(deltas[0] - 0.5, deltas[-1] + 0.5)
-    ax.set_ylim(lflanks[0] - 0.5, lflanks[-1] + 0.5)
-    ax.set_aspect("equal")
-    ax.set_xticks(deltas)
-    ax.set_yticks(lflanks)
-    ax.set_xticks(np.array(deltas, dtype=float) - 0.5, minor=True)
-    ax.set_yticks(np.array(lflanks, dtype=float) - 0.5, minor=True)
-    ax.grid(which="minor", color="#bbbbbb", linewidth=0.5)
-    ax.tick_params(which="major", labelsize=fontsize, colors="#222222")
-    ax.tick_params(which="minor", length=0)
-    for spine in ax.spines.values():
-        spine.set_color("black")
-        spine.set_linewidth(1.0)
-    if 0 in deltas:
-        ax.add_patch(Rectangle(
-            (-0.5, lflanks[0] - 0.5),
-            1, lflanks[-1] - lflanks[0] + 1,
-            fill=False, edgecolor="black", linewidth=1.5, zorder=5,
-        ))
+    # Iteration order here (yi outer, xi inner) matches the original
+    # _draw_state_panel for pixel-identical patch z-order.
+    _draw_glyphs(
+        ax, xs=deltas, ys=lflanks,
+        fwd_at=lambda xi, yi: fwd_grid.iat[yi, xi],
+        rc_at=lambda xi, yi: rc_grid.iat[yi, xi],
+        color_of=color_of,
+    )
+    _format_grid_axes(ax, xs=deltas, ys=lflanks, fontsize=fontsize)
 
 
 _STATE_COLOR_DEFAULTS = dict(
     color_recovered="#08519c",    # dark blue   — P
-    color_co_optimal="#6baed6",   # light blue  — T
-    color_dominant="#ffffff",     # white       — M
+    color_co_optimal="#b7d8eb",   # light blue  — T
+    color_dominant="#ebb7b7",     # light red   — M
     color_dominated="#c0392b",    # red         — D
     color_nan="#cccccc",          # grey        — missing/NaN
 )
@@ -806,8 +873,8 @@ def plot_correctness_heatmap(
     lflanks: Iterable[int],
     arm_titles: Mapping[str, str],
     color_recovered: str = "#08519c",    # dark blue
-    color_co_optimal: str = "#6baed6",   # light blue
-    color_dominant: str = "#ffffff",     # white
+    color_co_optimal: str = "#b7d8eb",   # light blue
+    color_dominant: str = "#ebb7b7",     # light red
     color_dominated: str = "#c0392b",    # red
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -830,15 +897,15 @@ def plot_correctness_heatmap(
     State colors are labeled by a two-symbol code in the legend.  The
     first symbol is the alignment outcome (``✓`` correct, ``✗`` wrong);
     the second symbol is the chosen alignment's NW score relative to
-    truth's NW score (``=`` tied, ``<`` chosen lower than truth, ``>``
-    chosen higher than truth):
+    the ground-truth NW score (``=`` tied, ``<`` chosen lower than
+    ground truth, ``>`` chosen higher than ground truth):
 
-    - ``"P"`` ``✓ =`` → dark blue   (alignment correct; score equals truth)
-    - ``"T"`` ``✗ =`` → light blue  (alignment wrong; score equals truth)
-    - ``"M"`` ``✗ <`` → white       (alignment wrong; chosen scores below
-      truth — the aligner's heuristic settled for less)
+    - ``"P"`` ``✓ =`` → dark blue   (alignment correct; score equals ground truth)
+    - ``"T"`` ``✗ =`` → light blue  (alignment wrong; score equals ground truth)
+    - ``"M"`` ``✗ <`` → light red   (alignment wrong; chosen scores below
+      ground truth — the aligner's heuristic settled for less)
     - ``"D"`` ``✗ >`` → red         (alignment wrong; chosen scores above
-      truth — the scoring landscape rejects truth)
+      ground truth — the scoring landscape rejects the ground truth)
     - NaN (infeasible / missing) → grey
 
     Parameters
@@ -859,7 +926,6 @@ def plot_correctness_heatmap(
     matplotlib.figure.Figure
     """
     import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch
 
     deltas = list(deltas)
     lflanks = list(lflanks)
@@ -894,35 +960,18 @@ def plot_correctness_heatmap(
         ax.set_title(arm_titles[arm], fontsize=title_size, color="#222222")
     axes[0].set_ylabel("lflank extent", fontsize=label_size, color="#222222")
 
-    shape_color = "#999999"
-    blank = Patch(facecolor="none", edgecolor="none")
     # Single legend laid out as a 4-row × 2-col grid.  Matplotlib fills
     # column-by-column (col 1 top→bottom, then col 2), so entries are
     # ordered: 4 verdict-color rows (col 1), then 2 strand-shape rows
     # plus 2 blanks (col 2).
-    interleaved_handles = [
-        Patch(facecolor=color_recovered,  edgecolor="#bbbbbb"),
-        Patch(facecolor=color_co_optimal, edgecolor="#bbbbbb"),
-        Patch(facecolor=color_dominant,   edgecolor="#bbbbbb"),
-        Patch(facecolor=color_dominated,  edgecolor="#bbbbbb"),
-        Patch(facecolor=shape_color, edgecolor="#222222", linewidth=0.6),
-        _CircleHandle(color=shape_color),
-        blank,
-        blank,
-    ]
-    interleaved_labels = [
-        "✓ align, score = truth",
-        "✗ align, score = truth",
-        "✗ align, score < truth",
-        "✗ align, score > truth",
-        "forward",
-        "reverse",
-        "",
-        "",
-    ]
+    interleaved_handles, interleaved_labels = _legend_handles_states_strands(
+        color_recovered, color_co_optimal, color_dominant, color_dominated,
+        with_blanks=True,
+    )
 
     panel_top = 0.86 if suptitle else 0.92
-    fig.subplots_adjust(right=0.70, top=panel_top, bottom=0.10)
+    panel_left, panel_right = 0.09, 0.70
+    fig.subplots_adjust(left=panel_left, right=panel_right, top=panel_top, bottom=0.10)
 
     legend_y = 0.5 * panel_top + 0.05
     fig.legend(
@@ -945,13 +994,15 @@ def plot_correctness_heatmap(
         labelcolor="#222222",
     )
 
+    # Center the title block over the panel area, not the whole figure
+    # (which includes the legend on the right) — otherwise suptitle and
+    # subtitle drift apart and read as off-centered.
+    cx = (panel_left + panel_right) / 2
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.97,
+        fig.suptitle(suptitle, x=cx, fontsize=title_size + 1, y=0.97,
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        sub_y = 0.93 if suptitle is not None else 0.95
-        # Center on the panel area (not the whole figure, which includes legend).
-        cx = (axes[0].get_position().x0 + axes[-1].get_position().x1) / 2
+        sub_y = 0.91 if suptitle is not None else 0.95
         fig.text(cx, sub_y, subtitle, ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
@@ -996,8 +1047,8 @@ def plot_correctness_heatmap_rows(
     arm_titles: Mapping[str, str],
     row_label_fn,
     color_recovered: str = "#08519c",
-    color_co_optimal: str = "#6baed6",
-    color_dominant: str = "#ffffff",
+    color_co_optimal: str = "#b7d8eb",
+    color_dominant: str = "#ebb7b7",
     color_dominated: str = "#c0392b",
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -1039,9 +1090,6 @@ def plot_correctness_heatmap_rows(
     -------
     matplotlib.figure.Figure
     """
-    import matplotlib.pyplot as plt
-    from matplotlib.patches import Patch
-
     deltas = list(deltas)
     lflanks = list(lflanks)
     arms = list(arm_titles.keys())
@@ -1049,29 +1097,17 @@ def plot_correctness_heatmap_rows(
     n_rows = len(rows)
     n_cols = len(arms)
 
-    label_size = (fontsize + 1) * font_scale
-    title_size = (fontsize + 3) * font_scale
-    fontsize = fontsize * font_scale
-
     color_of = _state_color_fn(
         color_recovered=color_recovered, color_co_optimal=color_co_optimal,
         color_dominant=color_dominant, color_dominated=color_dominated,
         color_nan=color_nan,
     )
 
-    figsize = (
-        scale * (5.0 * n_cols + 0.8),
-        scale * (5.0 * n_rows + 1.6),
+    fig, axes, label_size, title_size, fontsize, m = _build_rows_figure(
+        n_rows=n_rows, n_cols=n_cols, fontsize=fontsize,
+        scale=scale, font_scale=font_scale,
+        suptitle=suptitle, subtitle=subtitle,
     )
-    fig, axes = plt.subplots(
-        n_rows, n_cols,
-        figsize=figsize,
-        sharex=True, sharey=True,
-        gridspec_kw={"wspace": 0.02, "hspace": 0.18},
-        subplot_kw={"facecolor": "white"},
-        squeeze=False,
-    )
-    fig.patch.set_facecolor("white")
 
     for r, (key, df) in enumerate(rows):
         for c, arm in enumerate(arms):
@@ -1092,34 +1128,14 @@ def plot_correctness_heatmap_rows(
             fontsize=label_size, color="#222222",
         )
 
-    shape_color = "#999999"
-    legend_handles = [
-        Patch(facecolor=color_recovered,  edgecolor="#bbbbbb"),
-        Patch(facecolor=color_co_optimal, edgecolor="#bbbbbb"),
-        Patch(facecolor=color_dominant,   edgecolor="#bbbbbb"),
-        Patch(facecolor=color_dominated,  edgecolor="#bbbbbb"),
-        Patch(facecolor=shape_color, edgecolor="#222222", linewidth=0.6),
-        _CircleHandle(color=shape_color),
-    ]
-    legend_labels = [
-        "✓ align, score = truth",
-        "✗ align, score = truth",
-        "✗ align, score < truth",
-        "✗ align, score > truth",
-        "forward",
-        "reverse",
-    ]
+    legend_handles, legend_labels = _legend_handles_states_strands(
+        color_recovered, color_co_optimal, color_dominant, color_dominated,
+    )
 
     # Panels fill the width; legend sits below the title block, anchored
     # to the figure's left margin.  Two rows × ncol=3 (column-major):
-    # col1 = score=truth (P,T), col2 = score≠truth (M,D),
+    # col1 = score=ground truth (P,T), col2 = score≠ground truth (M,D),
     # col3 = strand shapes (fwd, rc).
-    # Margins reserved in absolute inches via _rows_top_margin so the
-    # forehead stays constant as n_rows grows.
-    m = _rows_top_margin(figsize[1], suptitle is not None)
-    fig.subplots_adjust(left=0.07, right=0.98,
-                        top=m["panel_top"], bottom=m["panel_bottom"])
-
     fig.legend(
         handles=legend_handles,
         labels=legend_labels,
@@ -1135,12 +1151,6 @@ def plot_correctness_heatmap_rows(
         facecolor="white", edgecolor="#444444", labelcolor="#222222",
     )
 
-    if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=m["suptitle_y"],
-                     fontweight="bold", color="#222222")
-    if subtitle is not None:
-        fig.text(0.5, m["subtitle_y"], subtitle, ha="center", va="top",
-                 fontsize=label_size, style="italic", color="#444444")
     return fig
 
 
@@ -1153,7 +1163,7 @@ def plot_correctness_heatmap_rows(
 # within each cell are aggregated into a per-strand summary by a
 # pluggable ``cell_value_fn``; that value is then mapped to a color by
 # ``color_fn``.  This lets the discrete (P/T/M/D state) and continuous
-# (fraction-of-score=truth) heatmaps share the panel-drawing core.
+# (fraction-of-score=ground-truth) heatmaps share the panel-drawing core.
 # ---------------------------------------------------------------------------
 
 
@@ -1165,13 +1175,24 @@ def _draw_2d_grid_panel(ax, sub_df, *, deltas1, deltas2,
     per-strand summary for one cell.  ``color_fn(value) -> color``
     maps that summary to a color (handles None / NaN as the NaN color).
     """
-    import numpy as np
-    from matplotlib.patches import Circle, Rectangle
-
+    # Precompute per-cell (fwd, rc) values once so the inner iteration
+    # below can reuse _draw_glyphs without re-filtering.  Iteration
+    # order here (d1 outer, d2 inner) matches the original
+    # _draw_2d_grid_panel for pixel-identical patch z-order.
+    values = {}
     for d1 in deltas1:
         for d2 in deltas2:
             cell = sub_df[(sub_df["delta1"] == d1) & (sub_df["delta2"] == d2)]
-            fwd_v, rc_v = cell_value_fn(cell)
+            values[(d1, d2)] = cell_value_fn(cell)
+
+    # _draw_glyphs iterates ys outer, xs inner; we want d1 outer, d2
+    # inner to match the legacy z-order, so xs=deltas2 and ys=deltas1
+    # is wrong (would flip axes).  Iterate explicitly to preserve both
+    # axis assignment AND patch order.
+    from matplotlib.patches import Circle, Rectangle
+    for d1 in deltas1:
+        for d2 in deltas2:
+            fwd_v, rc_v = values[(d1, d2)]
             ax.add_patch(Rectangle(
                 (d1 - 0.5, d2 - 0.5), 1, 1,
                 facecolor=color_fn(fwd_v), edgecolor="none", linewidth=0,
@@ -1182,39 +1203,13 @@ def _draw_2d_grid_panel(ax, sub_df, *, deltas1, deltas2,
                 edgecolor="#222222", linewidth=0.6, zorder=4,
             ))
 
-    ax.set_xlim(deltas1[0] - 0.5, deltas1[-1] + 0.5)
-    ax.set_ylim(deltas2[0] - 0.5, deltas2[-1] + 0.5)
-    ax.set_aspect("equal")
-    ax.set_xticks(deltas1)
-    ax.set_yticks(deltas2)
-    ax.set_xticks(np.array(deltas1, dtype=float) - 0.5, minor=True)
-    ax.set_yticks(np.array(deltas2, dtype=float) - 0.5, minor=True)
-    ax.grid(which="minor", color="#bbbbbb", linewidth=0.5)
-    ax.tick_params(which="major", labelsize=fontsize, colors="#222222")
-    ax.tick_params(which="minor", length=0)
-    for spine in ax.spines.values():
-        spine.set_color("black")
-        spine.set_linewidth(1.0)
-    if 0 in deltas1:
-        ax.add_patch(Rectangle(
-            (-0.5, deltas2[0] - 0.5), 1,
-            deltas2[-1] - deltas2[0] + 1,
-            fill=False, edgecolor="black", linewidth=1.5, zorder=5,
-        ))
-    if 0 in deltas2:
-        ax.add_patch(Rectangle(
-            (deltas1[0] - 0.5, -0.5),
-            deltas1[-1] - deltas1[0] + 1, 1,
-            fill=False, edgecolor="black", linewidth=1.5, zorder=5,
-        ))
+    _format_grid_axes(ax, xs=deltas1, ys=deltas2, fontsize=fontsize,
+                      highlight_zero_x=True, highlight_zero_y=True)
 
 
 def _state_value_fn(combine_across_reads):
     """Return a ``cell_value_fn`` that reduces per-cell states under the
     given policy; returns ``(fwd, rc)`` strings (or ``None`` for empty)."""
-    from functools import reduce
-    from .core import combine_states
-
     def value_fn(cell_df):
         if "fwd_state" in cell_df.columns and "rc_state" in cell_df.columns:
             fwds = [s for s in cell_df["fwd_state"].tolist()
@@ -1266,9 +1261,15 @@ def _PROPORTION_CMAP():
 
 
 def _legend_handles_states_strands(color_recovered, color_co_optimal,
-                                   color_dominant, color_dominated):
+                                   color_dominant, color_dominated,
+                                   *, with_blanks=False):
     """Build the standard 6-entry legend (4 states + fwd/rc shapes)
-    matching :func:`plot_correctness_heatmap_rows`."""
+    matching :func:`plot_correctness_heatmap_rows`.
+
+    When ``with_blanks=True`` two empty entries are appended so the
+    legend lays out cleanly as a 4-row × 2-col grid (matplotlib fills
+    column-by-column).
+    """
     from matplotlib.patches import Patch
     shape_color = "#999999"
     handles = [
@@ -1280,13 +1281,132 @@ def _legend_handles_states_strands(color_recovered, color_co_optimal,
         _CircleHandle(color=shape_color),
     ]
     labels = [
-        "✓ align, score = truth",
-        "✗ align, score = truth",
-        "✗ align, score < truth",
-        "✗ align, score > truth",
+        "✓ align, score = GT",
+        "✗ align, score = GT",
+        "✗ align, score < GT",
+        "✗ align, score > GT",
         "forward",
         "reverse",
     ]
+    if with_blanks:
+        blank = Patch(facecolor="none", edgecolor="none")
+        handles += [blank, blank]
+        labels += ["", ""]
+    return handles, labels
+
+
+def _build_rows_figure(
+    *, n_rows, n_cols, fontsize, scale, font_scale, suptitle, subtitle,
+):
+    """Common multi-row figure shell shared by every ``*_rows`` heatmap.
+
+    Builds a (n_rows, n_cols) subplots grid using the standard
+    ``5.0 * n_cols + 0.8`` × ``5.0 * n_rows + 1.6`` inch figsize
+    (scaled by ``scale``), reserves the top margin in absolute inches
+    via :func:`_rows_top_margin`, applies the standard left/right
+    margins, and draws the fig-level suptitle/subtitle.
+
+    Returns ``(fig, axes, label_size, title_size, fontsize_scaled, m)``.
+    ``m`` is the margin dict from :func:`_rows_top_margin` so callers
+    can place the legend / colorbar at ``m["legend_y"]``.
+    """
+    import matplotlib.pyplot as plt
+
+    label_size = (fontsize + 1) * font_scale
+    title_size = (fontsize + 3) * font_scale
+    fontsize_scaled = fontsize * font_scale
+
+    figsize = (
+        scale * (5.0 * n_cols + 0.8),
+        scale * (5.0 * n_rows + 1.6),
+    )
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=figsize,
+        sharex=True, sharey=True,
+        gridspec_kw={"wspace": 0.02, "hspace": 0.18},
+        subplot_kw={"facecolor": "white"},
+        squeeze=False,
+    )
+    fig.patch.set_facecolor("white")
+
+    m = _rows_top_margin(figsize[1], suptitle is not None)
+    fig.subplots_adjust(left=0.07, right=0.98,
+                        top=m["panel_top"], bottom=m["panel_bottom"])
+
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=m["suptitle_y"],
+                     fontweight="bold", color="#222222")
+    if subtitle is not None:
+        fig.text(0.5, m["subtitle_y"], subtitle, ha="center", va="top",
+                 fontsize=label_size, style="italic", color="#444444")
+
+    return fig, axes, label_size, title_size, fontsize_scaled, m
+
+
+def _build_single_row_2d_figure(
+    *, n, fontsize, suptitle, subtitle,
+    panel_left=0.06, panel_right=0.82,
+):
+    """Common single-row 2-D figure shell.
+
+    Creates a (1, n) subplots grid sized to the standard 5.8-inch height,
+    reserves the top strip in absolute inches for suptitle/subtitle and
+    per-panel axis titles, applies the standard margins, and draws the
+    fig-level suptitle/subtitle centered over the panel area.
+
+    Returns ``(fig, axes_row, label_size, title_size, panel_top)`` —
+    callers add their right-side block (legend or colorbar) and the
+    per-panel content.  ``axes_row`` is a flat list of length ``n``.
+    """
+    import matplotlib.pyplot as plt
+
+    label_size = fontsize + 1
+    title_size = fontsize + 3
+
+    fig, axes = plt.subplots(
+        1, n, figsize=(5.0 * n + 3.0, 5.8),
+        sharey=True,
+        gridspec_kw={"wspace": 0.04},
+        subplot_kw={"facecolor": "white"},
+        squeeze=False,
+    )
+    fig.patch.set_facecolor("white")
+
+    fig_h = 5.8
+    top_in    = 1.30
+    bottom_in = 0.50
+    sup_in    = 0.20
+    sub_in    = 0.65 if suptitle is not None else 0.30
+    panel_top = 1.0 - top_in / fig_h
+    fig.subplots_adjust(left=panel_left, right=panel_right,
+                        top=panel_top, bottom=bottom_in / fig_h)
+
+    # Center the title block over the panel area (left..right), not the
+    # whole figure, so suptitle and subtitle stay aligned with each other.
+    cx = (panel_left + panel_right) / 2
+    if suptitle is not None:
+        fig.suptitle(suptitle, x=cx, fontsize=title_size + 1,
+                     y=1.0 - sup_in / fig_h,
+                     fontweight="bold", color="#222222")
+    if subtitle is not None:
+        fig.text(cx, 1.0 - sub_in / fig_h, subtitle,
+                 ha="center", va="top",
+                 fontsize=label_size, style="italic", color="#444444")
+    axes_row = [axes[0, c] for c in range(n)]
+    return fig, axes_row, label_size, title_size, panel_top
+
+
+def _legend_handles_shapes():
+    """Build the 2-entry shape-only legend (fwd Rectangle + rc Circle)
+    used by the proportion heatmaps."""
+    from matplotlib.patches import Patch
+    shape_color = "#999999"
+    handles = [
+        Patch(facecolor=shape_color, edgecolor="#222222", linewidth=0.6),
+        _CircleHandle(color=shape_color),
+    ]
+    labels = ["forward", "reverse"]
     return handles, labels
 
 
@@ -1298,8 +1418,8 @@ def plot_correctness_heatmap_2d(
     arm_titles: Mapping[str, str],
     combine_across_reads: str = "best",
     color_recovered: str = "#08519c",
-    color_co_optimal: str = "#6baed6",
-    color_dominant: str = "#ffffff",
+    color_co_optimal: str = "#b7d8eb",
+    color_dominant: str = "#ebb7b7",
     color_dominated: str = "#c0392b",
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -1317,14 +1437,10 @@ def plot_correctness_heatmap_2d(
     ``df`` must carry columns ``arm``, ``delta1``, ``delta2``, and
     either ``fwd_state`` + ``rc_state`` or a single ``state``.
     """
-    import matplotlib.pyplot as plt
-
     deltas1 = list(deltas1)
     deltas2 = list(deltas2)
     arms = list(arm_titles.keys())
     n = len(arms)
-    label_size = fontsize + 1
-    title_size = fontsize + 3
 
     color_of = _state_color_fn(
         color_recovered=color_recovered, color_co_optimal=color_co_optimal,
@@ -1333,17 +1449,12 @@ def plot_correctness_heatmap_2d(
     )
     value_fn = _state_value_fn(combine_across_reads)
 
-    fig, axes = plt.subplots(
-        1, n, figsize=(5.0 * n + 3.0, 5.8),
-        sharey=True,
-        gridspec_kw={"wspace": 0.04},
-        subplot_kw={"facecolor": "white"},
-        squeeze=False,
+    fig, axes_row, label_size, title_size, _ = _build_single_row_2d_figure(
+        n=n, fontsize=fontsize, suptitle=suptitle, subtitle=subtitle,
     )
-    fig.patch.set_facecolor("white")
 
     for c, arm in enumerate(arms):
-        ax = axes[0, c]
+        ax = axes_row[c]
         _draw_2d_grid_panel(
             ax, df[df["arm"] == arm],
             deltas1=deltas1, deltas2=deltas2,
@@ -1351,23 +1462,14 @@ def plot_correctness_heatmap_2d(
         )
         ax.set_title(arm_titles[arm], fontsize=title_size, color="#222222")
         ax.set_xlabel(r"$\Delta_1$", fontsize=label_size, color="#222222")
-    axes[0, 0].set_ylabel(r"$\Delta_2$",
-                          fontsize=label_size, color="#222222")
+    axes_row[0].set_ylabel(r"$\Delta_2$",
+                            fontsize=label_size, color="#222222")
 
     # Single-row layout: legend goes in the right column so the top
     # strip is free for suptitle + subtitle without the legend crowding
     # them.  Top reservation is in absolute inches so the title strip
     # leaves room for both fig-level titles AND the per-panel axis
     # titles (``ax.set_title``) below them without overlap.
-    fig_h = 5.8
-    top_in    = 1.30
-    bottom_in = 0.50
-    sup_in    = 0.20
-    sub_in    = 0.55 if suptitle is not None else 0.30
-    panel_top = 1.0 - top_in / fig_h
-    fig.subplots_adjust(left=0.06, right=0.82,
-                        top=panel_top, bottom=bottom_in / fig_h)
-
     legend_handles, legend_labels = _legend_handles_states_strands(
         color_recovered, color_co_optimal, color_dominant, color_dominated,
     )
@@ -1383,14 +1485,6 @@ def plot_correctness_heatmap_2d(
         facecolor="white", edgecolor="#444444", labelcolor="#222222",
     )
 
-    if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1,
-                     y=1.0 - sup_in / fig_h,
-                     fontweight="bold", color="#222222")
-    if subtitle is not None:
-        fig.text(0.5, 1.0 - sub_in / fig_h, subtitle,
-                 ha="center", va="top",
-                 fontsize=label_size, style="italic", color="#444444")
     return fig
 
 
@@ -1405,8 +1499,8 @@ def plot_correctness_heatmap_2d_rows(
     row_label_fn=None,
     combine_across_reads: str = "best",
     color_recovered: str = "#08519c",
-    color_co_optimal: str = "#6baed6",
-    color_dominant: str = "#ffffff",
+    color_co_optimal: str = "#b7d8eb",
+    color_dominant: str = "#ebb7b7",
     color_dominated: str = "#c0392b",
     color_nan: str = "#cccccc",
     fontsize: int = 14,
@@ -1418,16 +1512,12 @@ def plot_correctness_heatmap_2d_rows(
     per bridge length), filtered from ``df`` on ``row_col``.  Shares the
     fwd-Rectangle / rc-Circle convention and the legend-above layout
     with :func:`plot_correctness_heatmap_2d`."""
-    import matplotlib.pyplot as plt
-
     deltas1 = list(deltas1)
     deltas2 = list(deltas2)
     arms = list(arm_titles.keys())
     row_values = list(row_values)
     n_arms = len(arms)
     n_rows = len(row_values)
-    label_size = fontsize + 1
-    title_size = fontsize + 3
 
     color_of = _state_color_fn(
         color_recovered=color_recovered, color_co_optimal=color_co_optimal,
@@ -1436,18 +1526,11 @@ def plot_correctness_heatmap_2d_rows(
     )
     value_fn = _state_value_fn(combine_across_reads)
 
-    figsize = (
-        scale * (5.0 * n_arms + 0.8),
-        scale * (5.0 * n_rows + 1.6),
+    fig, axes, label_size, title_size, _, m = _build_rows_figure(
+        n_rows=n_rows, n_cols=n_arms, fontsize=fontsize,
+        scale=scale, font_scale=1.0,
+        suptitle=suptitle, subtitle=subtitle,
     )
-    fig, axes = plt.subplots(
-        n_rows, n_arms, figsize=figsize,
-        sharex=True, sharey=True,
-        gridspec_kw={"wspace": 0.02, "hspace": 0.18},
-        subplot_kw={"facecolor": "white"},
-        squeeze=False,
-    )
-    fig.patch.set_facecolor("white")
 
     for r, key in enumerate(row_values):
         sub_row = df[df[row_col] == key]
@@ -1470,12 +1553,6 @@ def plot_correctness_heatmap_2d_rows(
         axes[r, 0].set_ylabel(f"{row_label}\n$\\Delta_2$",
                               fontsize=label_size, color="#222222")
 
-    # Absolute-inch top reservation via _rows_top_margin so the
-    # forehead stays constant as n_rows grows.
-    m = _rows_top_margin(figsize[1], suptitle is not None)
-    fig.subplots_adjust(left=0.07, right=0.98,
-                        top=m["panel_top"], bottom=m["panel_bottom"])
-
     legend_handles, legend_labels = _legend_handles_states_strands(
         color_recovered, color_co_optimal, color_dominant, color_dominated,
     )
@@ -1491,12 +1568,6 @@ def plot_correctness_heatmap_2d_rows(
         facecolor="white", edgecolor="#444444", labelcolor="#222222",
     )
 
-    if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=m["suptitle_y"],
-                     fontweight="bold", color="#222222")
-    if subtitle is not None:
-        fig.text(0.5, m["subtitle_y"], subtitle, ha="center", va="top",
-                 fontsize=label_size, style="italic", color="#444444")
     return fig
 
 
@@ -1509,43 +1580,34 @@ def plot_proportion_heatmap_2d(
     fontsize: int = 14,
     suptitle: str | None = None,
     subtitle: str | None = None,
-    cbar_label: str = "P(score = truth)",
+    cbar_label: str = "P(score = ground truth)",
 ):
     """Continuous-color 2-D heatmap of the per-strand fraction of reads
-    whose chosen alignment has score equal to truth (states P or T).
+    whose chosen alignment has score equal to ground truth (states P or T).
 
     Glyph convention matches :func:`plot_correctness_heatmap_2d`:
     Rectangle = fwd-strand proportion, Circle = rc-strand proportion.
     Horizontal colorbar sits above the panels with explicit ticks at
     0.0, 0.25, 0.5, 0.75, 1.0; a small fwd/rc shape legend sits beside.
     """
-    import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
-    from matplotlib.patches import Patch
 
     deltas1 = list(deltas1)
     deltas2 = list(deltas2)
     arms = list(arm_titles.keys())
     n = len(arms)
-    label_size = fontsize + 1
-    title_size = fontsize + 3
 
     cmap = _PROPORTION_CMAP()
     norm = Normalize(vmin=0.0, vmax=1.0)
     color_of = _proportion_color_fn(cmap, norm)
 
-    fig, axes = plt.subplots(
-        1, n, figsize=(5.0 * n + 3.0, 5.8),
-        sharey=True,
-        gridspec_kw={"wspace": 0.04},
-        subplot_kw={"facecolor": "white"},
-        squeeze=False,
+    fig, axes_row, label_size, title_size, _ = _build_single_row_2d_figure(
+        n=n, fontsize=fontsize, suptitle=suptitle, subtitle=subtitle,
     )
-    fig.patch.set_facecolor("white")
 
     for c, arm in enumerate(arms):
-        ax = axes[0, c]
+        ax = axes_row[c]
         _draw_2d_grid_panel(
             ax, df[df["arm"] == arm],
             deltas1=deltas1, deltas2=deltas2,
@@ -1554,20 +1616,8 @@ def plot_proportion_heatmap_2d(
         )
         ax.set_title(arm_titles[arm], fontsize=title_size, color="#222222")
         ax.set_xlabel(r"$\Delta_1$", fontsize=label_size, color="#222222")
-    axes[0, 0].set_ylabel(r"$\Delta_2$",
-                          fontsize=label_size, color="#222222")
-
-    # Single-row layout: colorbar + shape legend on the right so the
-    # top strip is free for suptitle + subtitle.  Top reservation in
-    # absolute inches so axis titles don't crowd the subtitle.
-    fig_h = 5.8
-    top_in    = 1.30
-    bottom_in = 0.50
-    sup_in    = 0.20
-    sub_in    = 0.55 if suptitle is not None else 0.30
-    panel_top = 1.0 - top_in / fig_h
-    fig.subplots_adjust(left=0.06, right=0.82,
-                        top=panel_top, bottom=bottom_in / fig_h)
+    axes_row[0].set_ylabel(r"$\Delta_2$",
+                            fontsize=label_size, color="#222222")
 
     # Colorbar on the right.  Shortened (h=0.36, top at 0.70) so the
     # forward/reverse legend below has clearance; label moved to the
@@ -1581,13 +1631,9 @@ def plot_proportion_heatmap_2d(
                    labelpad=8)
     cbar.ax.tick_params(labelsize=fontsize - 1, colors="#222222")
 
-    shape_color = "#999999"
-    shape_handles = [
-        Patch(facecolor=shape_color, edgecolor="#222222", linewidth=0.6),
-        _CircleHandle(color=shape_color),
-    ]
+    shape_handles, shape_labels = _legend_handles_shapes()
     fig.legend(
-        handles=shape_handles, labels=["forward", "reverse"],
+        handles=shape_handles, labels=shape_labels,
         handler_map={_CircleHandle: _make_circle_handler()},
         ncol=1, loc="lower left",
         bbox_to_anchor=(0.84, 0.06),
@@ -1598,14 +1644,6 @@ def plot_proportion_heatmap_2d(
         facecolor="white", edgecolor="#444444", labelcolor="#222222",
     )
 
-    if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1,
-                     y=1.0 - sup_in / fig_h,
-                     fontweight="bold", color="#222222")
-    if subtitle is not None:
-        fig.text(0.5, 1.0 - sub_in / fig_h, subtitle,
-                 ha="center", va="top",
-                 fontsize=label_size, style="italic", color="#444444")
     return fig
 
 
@@ -1622,13 +1660,11 @@ def plot_proportion_heatmap_2d_rows(
     scale: float = 1.0,
     suptitle: str | None = None,
     subtitle: str | None = None,
-    cbar_label: str = "P(score = truth)",
+    cbar_label: str = "P(score = ground truth)",
 ):
     """Multi-row variant of :func:`plot_proportion_heatmap_2d`."""
-    import matplotlib.pyplot as plt
     from matplotlib.cm import ScalarMappable
     from matplotlib.colors import Normalize
-    from matplotlib.patches import Patch
 
     deltas1 = list(deltas1)
     deltas2 = list(deltas2)
@@ -1636,25 +1672,16 @@ def plot_proportion_heatmap_2d_rows(
     row_values = list(row_values)
     n_arms = len(arms)
     n_rows = len(row_values)
-    label_size = fontsize + 1
-    title_size = fontsize + 3
 
     cmap = _PROPORTION_CMAP()
     norm = Normalize(vmin=0.0, vmax=1.0)
     color_of = _proportion_color_fn(cmap, norm)
 
-    figsize = (
-        scale * (5.0 * n_arms + 0.8),
-        scale * (5.0 * n_rows + 1.6),
+    fig, axes, label_size, title_size, _, m = _build_rows_figure(
+        n_rows=n_rows, n_cols=n_arms, fontsize=fontsize,
+        scale=scale, font_scale=1.0,
+        suptitle=suptitle, subtitle=subtitle,
     )
-    fig, axes = plt.subplots(
-        n_rows, n_arms, figsize=figsize,
-        sharex=True, sharey=True,
-        gridspec_kw={"wspace": 0.02, "hspace": 0.18},
-        subplot_kw={"facecolor": "white"},
-        squeeze=False,
-    )
-    fig.patch.set_facecolor("white")
 
     for r, key in enumerate(row_values):
         sub_row = df[df[row_col] == key]
@@ -1677,16 +1704,11 @@ def plot_proportion_heatmap_2d_rows(
         axes[r, 0].set_ylabel(f"{row_label}\n$\\Delta_2$",
                               fontsize=label_size, color="#222222")
 
-    # Absolute-inch top reservation via _rows_top_margin so the
-    # forehead stays constant as n_rows grows.  Colorbar height is
-    # also fixed in inches so it doesn't bloat with figure height.
-    fig_h = figsize[1]
-    m = _rows_top_margin(fig_h, suptitle is not None)
-    fig.subplots_adjust(left=0.07, right=0.98,
-                        top=m["panel_top"], bottom=m["panel_bottom"])
-
+    # Colorbar height is fixed in inches so it doesn't bloat with figure
+    # height; ~0.9 in above panel_top (which sits at 2.2 in from top).
+    fig_h = fig.get_figheight()
     cbar_height_in = 0.18
-    cbar_bottom_in = 1.30   # ~0.9 in above panel_top (panel_top at 2.2 in)
+    cbar_bottom_in = 1.30
     cbar_y_frac    = 1.0 - cbar_bottom_in / fig_h
     cbar_h_frac    = cbar_height_in       / fig_h
     cbar_ax = fig.add_axes([0.10, cbar_y_frac, 0.45, cbar_h_frac])
@@ -1696,13 +1718,9 @@ def plot_proportion_heatmap_2d_rows(
     cbar.set_label(cbar_label, fontsize=fontsize, color="#222222")
     cbar.ax.tick_params(labelsize=fontsize - 1, colors="#222222")
 
-    shape_color = "#999999"
-    shape_handles = [
-        Patch(facecolor=shape_color, edgecolor="#222222", linewidth=0.6),
-        _CircleHandle(color=shape_color),
-    ]
+    shape_handles, shape_labels = _legend_handles_shapes()
     fig.legend(
-        handles=shape_handles, labels=["forward", "reverse"],
+        handles=shape_handles, labels=shape_labels,
         handler_map={_CircleHandle: _make_circle_handler()},
         ncol=2, loc="lower left",
         bbox_to_anchor=(0.62, cbar_y_frac),
@@ -1713,11 +1731,215 @@ def plot_proportion_heatmap_2d_rows(
         facecolor="white", edgecolor="#444444", labelcolor="#222222",
     )
 
+    return fig
+
+
+def plot_proportion_heatmap(
+    df,
+    *,
+    deltas: Iterable[int],
+    lflanks: Iterable[int],
+    arm_titles: Mapping[str, str],
+    fontsize: int = 14,
+    suptitle: str | None = None,
+    subtitle: str | None = None,
+    cbar_label: str = "fraction of reads with score = truth",
+):
+    """1-D analog of :func:`plot_proportion_heatmap_2d`.
+
+    ``df`` must carry columns ``arm``, ``delta``, ``lflank``, and
+    ``fwd_state`` + ``rc_state``.  Rows within a ``(delta, lflank,
+    arm)`` cell are aggregated by the proportion-value function; for a
+    cross-locus view, each row corresponds to one
+    ``(locus, delta, lflank, arm)`` observation and the proportion is
+    over loci.
+
+    Glyph convention matches :func:`plot_correctness_heatmap`:
+    Rectangle = fwd-strand proportion, Circle = rc-strand proportion.
+    Horizontal colorbar sits above the panels with explicit ticks at
+    0.0, 0.25, 0.5, 0.75, 1.0; a small fwd/rc shape legend sits beside.
+
+    Returns the :class:`~matplotlib.figure.Figure`.
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    deltas = list(deltas)
+    lflanks = list(lflanks)
+    arms = list(arm_titles.keys())
+    n = len(arms)
+    label_size = fontsize + 1
+    title_size = fontsize + 3
+
+    cmap = _PROPORTION_CMAP()
+    norm = Normalize(vmin=0.0, vmax=1.0)
+    color_of = _proportion_color_fn(cmap, norm)
+
+    fig, axes = plt.subplots(
+        1, n, figsize=(5.0 * n + 2.5, 6.6), sharey=True,
+        gridspec_kw={"wspace": 0.06},
+        subplot_kw={"facecolor": "white"},
+        squeeze=False,
+    )
+    fig.patch.set_facecolor("white")
+
+    for c, arm in enumerate(arms):
+        ax = axes[0, c]
+        _draw_1d_grid_panel(
+            ax, df[df["arm"] == arm],
+            deltas=deltas, lflanks=lflanks,
+            cell_value_fn=_proportion_value_fn,
+            color_fn=color_of, fontsize=fontsize,
+        )
+        ax.set_xlabel("Δ (Hap N $-$ Ref N)",
+                      fontsize=label_size, color="#222222")
+        ax.set_title(arm_titles[arm], fontsize=title_size,
+                     color="#222222")
+    axes[0, 0].set_ylabel("lflank extent",
+                          fontsize=label_size, color="#222222")
+
+    panel_top = 0.74 if suptitle else 0.80
+    fig.subplots_adjust(left=0.07, right=0.98, top=panel_top, bottom=0.10)
+
+    cbar_ax = fig.add_axes([0.10, panel_top + 0.055, 0.45, 0.025])
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    cbar = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
+    cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
+    cbar.set_label(cbar_label, fontsize=fontsize, color="#222222")
+    cbar.ax.tick_params(labelsize=fontsize - 1, colors="#222222")
+
+    shape_handles, shape_labels = _legend_handles_shapes()
+    fig.legend(
+        handles=shape_handles, labels=shape_labels,
+        handler_map={_CircleHandle: _make_circle_handler()},
+        ncol=2, loc="lower left",
+        bbox_to_anchor=(0.62, panel_top + 0.04),
+        frameon=True, fontsize=fontsize,
+        handlelength=1.9, handleheight=1.9,
+        handletextpad=0.6, columnspacing=1.6,
+        borderpad=0.7,
+        facecolor="white", edgecolor="#444444", labelcolor="#222222",
+    )
+
     if suptitle is not None:
-        fig.suptitle(suptitle, fontsize=title_size + 1, y=m["suptitle_y"],
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.985,
                      fontweight="bold", color="#222222")
     if subtitle is not None:
-        fig.text(0.5, m["subtitle_y"], subtitle, ha="center", va="top",
+        sub_y = 0.95 if suptitle else 0.97
+        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
+                 fontsize=label_size, style="italic", color="#444444")
+    return fig
+
+
+def plot_proportion_heatmap_rows(
+    rows,
+    *,
+    deltas: Iterable[int],
+    lflanks: Iterable[int],
+    arm_titles: Mapping[str, str],
+    row_label_fn,
+    fontsize: int = 14,
+    scale: float = 1.0,
+    font_scale: float = 1.0,
+    suptitle: str | None = None,
+    subtitle: str | None = None,
+    cbar_label: str = "fraction of reads with score = truth",
+    cell_value_fn=None,
+):
+    """Multi-row variant of :func:`plot_proportion_heatmap`.
+
+    ``rows`` is a list of ``(key, df_subset)`` pairs.
+
+    ``cell_value_fn`` defaults to the per-locus state-counting function,
+    matching the original cross-locus behavior.  Pass a custom function
+    to plot pre-aggregated fractions directly (one row per cell with
+    ``frac_fwd`` / ``frac_rc`` columns).
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.cm import ScalarMappable
+    from matplotlib.colors import Normalize
+
+    if cell_value_fn is None:
+        cell_value_fn = _proportion_value_fn
+
+    deltas = list(deltas)
+    lflanks = list(lflanks)
+    arms = list(arm_titles.keys())
+    rows = list(rows)
+    n_rows = len(rows)
+    n_cols = len(arms)
+    label_size = (fontsize + 1) * font_scale
+    title_size = (fontsize + 3) * font_scale
+    fontsize = fontsize * font_scale
+
+    cmap = _PROPORTION_CMAP()
+    norm = Normalize(vmin=0.0, vmax=1.0)
+    color_of = _proportion_color_fn(cmap, norm)
+
+    figsize = (
+        scale * (5.0 * n_cols + 0.8),
+        scale * (5.0 * n_rows + 1.6),
+    )
+    fig, axes = plt.subplots(
+        n_rows, n_cols,
+        figsize=figsize,
+        sharex=True, sharey=True,
+        gridspec_kw={"wspace": 0.02, "hspace": 0.18},
+        subplot_kw={"facecolor": "white"},
+        squeeze=False,
+    )
+    fig.patch.set_facecolor("white")
+
+    for r, (key, df) in enumerate(rows):
+        for c, arm in enumerate(arms):
+            ax = axes[r, c]
+            _draw_1d_grid_panel(
+                ax, df[df["arm"] == arm],
+                deltas=deltas, lflanks=lflanks,
+                cell_value_fn=cell_value_fn,
+                color_fn=color_of, fontsize=fontsize,
+            )
+            if r == 0:
+                ax.set_title(arm_titles[arm], fontsize=title_size,
+                             color="#222222")
+            if r == n_rows - 1:
+                ax.set_xlabel("Δ (Hap N $-$ Ref N)",
+                              fontsize=label_size, color="#222222")
+        axes[r, 0].set_ylabel(
+            f"{row_label_fn(key)}\nlflank extent",
+            fontsize=label_size, color="#222222",
+        )
+
+    panel_top = 0.84 if suptitle else 0.88
+    fig.subplots_adjust(left=0.07, right=0.98, top=panel_top, bottom=0.05)
+
+    cbar_ax = fig.add_axes([0.10, panel_top + 0.045, 0.45, 0.018])
+    sm = ScalarMappable(cmap=cmap, norm=norm)
+    cbar = fig.colorbar(sm, cax=cbar_ax, orientation="horizontal")
+    cbar.set_ticks([0.0, 0.25, 0.5, 0.75, 1.0])
+    cbar.set_label(cbar_label, fontsize=fontsize, color="#222222")
+    cbar.ax.tick_params(labelsize=fontsize - 1, colors="#222222")
+
+    shape_handles, shape_labels = _legend_handles_shapes()
+    fig.legend(
+        handles=shape_handles, labels=shape_labels,
+        handler_map={_CircleHandle: _make_circle_handler()},
+        ncol=2, loc="lower left",
+        bbox_to_anchor=(0.62, panel_top + 0.04),
+        frameon=True, fontsize=fontsize,
+        handlelength=1.9, handleheight=1.9,
+        handletextpad=0.6, columnspacing=1.6,
+        borderpad=0.7,
+        facecolor="white", edgecolor="#444444", labelcolor="#222222",
+    )
+
+    if suptitle is not None:
+        fig.suptitle(suptitle, fontsize=title_size + 1, y=0.985,
+                     fontweight="bold", color="#222222")
+    if subtitle is not None:
+        sub_y = 0.96 if suptitle else 0.985
+        fig.text(0.5, sub_y, subtitle, ha="center", va="top",
                  fontsize=label_size, style="italic", color="#444444")
     return fig
 
@@ -1743,6 +1965,10 @@ def plot_compound_layout_schematic(
     bridge_len: int,
     delta1_example: int = 0,
     delta2_example: int = 0,
+    delta1_range: Tuple[int, int] | None = None,
+    delta2_range: Tuple[int, int] | None = None,
+    bridge_len_range: Tuple[int, int] | None = None,
+    lflank_range: Tuple[int, int] | None = None,
     nwflex_factor: int = 3,
     show_nwflex: bool = True,
     mirror: bool = False,
@@ -1890,8 +2116,13 @@ def plot_compound_layout_schematic(
     ax.text(flank_w + block1_panel_w / 2, label_y,
             f"$R_1^{{{ref_n1}}}$", ha="center", va="bottom",
             fontsize=fontsize, color="#1f6090", fontweight="bold")
+    if bridge_len_range is not None:
+        lo, hi = bridge_len_range
+        m_label = f"$M \\in [{lo}, {hi}]$ bp"
+    else:
+        m_label = f"$M$ ({bridge_len} bp)"
     ax.text(flank_w + block1_panel_w + bridge_w / 2, label_y,
-            f"$M$ ({bridge_len} bp)", ha="center", va="bottom",
+            m_label, ha="center", va="bottom",
             fontsize=fontsize, color=bridge_edge, fontweight="bold")
     ax.text(flank_w + block1_panel_w + bridge_w + block2_panel_w / 2,
             label_y,
@@ -1971,26 +2202,36 @@ def plot_compound_layout_schematic(
     x0 += block2_panel_w
     _flank(x0, y_hap, flank_w, "right flank")
 
-    if delta1_example != 0:
+    if delta1_example != 0 or delta1_range is not None:
         cx = flank_w + block1_panel_w / 2
         ax.annotate(
             "", xy=(cx - 0.5, y_hap + bar_h + 0.10),
             xytext=(cx + 0.5, y_hap + bar_h + 0.10),
             arrowprops=dict(arrowstyle="<->", color=missing_edge, lw=1.4),
         )
+        if delta1_range is not None:
+            lo, hi = delta1_range
+            d1_label = f"$\\Delta_1 \\in [{lo:+d}, {hi:+d}]$"
+        else:
+            d1_label = f"$\\Delta_1 = {delta1_example:+d}$"
         ax.text(cx, y_hap + bar_h + 0.28,
-                f"$\\Delta_1 = {delta1_example:+d}$",
+                d1_label,
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
-    if delta2_example != 0:
+    if delta2_example != 0 or delta2_range is not None:
         cx = flank_w + block1_panel_w + bridge_w + block2_panel_w / 2
         ax.annotate(
             "", xy=(cx - 0.5, y_hap + bar_h + 0.10),
             xytext=(cx + 0.5, y_hap + bar_h + 0.10),
             arrowprops=dict(arrowstyle="<->", color=missing_edge, lw=1.4),
         )
+        if delta2_range is not None:
+            lo, hi = delta2_range
+            d2_label = f"$\\Delta_2 \\in [{lo:+d}, {hi:+d}]$"
+        else:
+            d2_label = f"$\\Delta_2 = {delta2_example:+d}$"
         ax.text(cx, y_hap + bar_h + 0.28,
-                f"$\\Delta_2 = {delta2_example:+d}$",
+                d2_label,
                 ha="center", va="bottom",
                 fontsize=fontsize - 1, color=missing_edge, fontweight="bold")
 
@@ -2051,8 +2292,13 @@ def plot_compound_layout_schematic(
         xytext=(flank_w, arrow_y),
         arrowprops=dict(arrowstyle="<->", color=read_outline, lw=1.4),
     )
+    if lflank_range is not None:
+        lo, hi = lflank_range
+        lflank_label = f"lflank extent $\\in [{lo}, {hi}]$"
+    else:
+        lflank_label = "lflank extent"
     ax.text(flank_w - top_lflank / 2, text_y,
-            "lflank extent",
+            lflank_label,
             ha="center", va="bottom",
             fontsize=fontsize - 1, color=read_outline, fontweight="bold")
 

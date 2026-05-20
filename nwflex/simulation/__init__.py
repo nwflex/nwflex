@@ -1,6 +1,5 @@
 """
-NW-flex simulation harness for notebook 07
-(NW-flex vs BWA-MEM comparison).
+Simulation harness for the NW-flex vs BWA-MEM performance comparison.
 
 Public API is re-exported here; users can import from
 ``nwflex.simulation`` directly, or reach into the submodules:
@@ -8,8 +7,11 @@ Public API is re-exported here; users can import from
 Submodules
 ----------
 - ``simulation.core`` — locus and haplotype construction, read tiling,
-  BWA-MEM wrappers, CIGAR decoding, per-arm correctness rule.
-- ``simulation.viz`` — text-based alignment visualizations.
+  BWA-MEM and NW-flex wrappers, CIGAR decoding, per-arm correctness,
+  mirror-frame strand handling, and scoring helpers.
+- ``simulation.viz`` — ASCII and matplotlib alignment visualizations.
+- ``simulation.sweep`` — parametric sweep harness with method classes
+  for BWA-MEM and NW-flex (single and compound repeats).
 
 Example imports::
 
@@ -70,6 +72,8 @@ from .viz import (
     plot_correctness_heatmap_rows,
     plot_correctness_heatmap_2d,
     plot_correctness_heatmap_2d_rows,
+    plot_proportion_heatmap,
+    plot_proportion_heatmap_rows,
     plot_proportion_heatmap_2d,
     plot_proportion_heatmap_2d_rows,
     plot_layout_schematic,
@@ -139,6 +143,8 @@ __all__ = [
     "plot_correctness_heatmap_rows",
     "plot_correctness_heatmap_2d",
     "plot_correctness_heatmap_2d_rows",
+    "plot_proportion_heatmap",
+    "plot_proportion_heatmap_rows",
     "plot_proportion_heatmap_2d",
     "plot_proportion_heatmap_2d_rows",
     "plot_layout_schematic",

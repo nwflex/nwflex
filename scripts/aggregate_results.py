@@ -19,7 +19,7 @@ Reads ``supplement/data/{single_repeat,compound}/*.csv`` written by
 
 Usage::
 
-    python scripts/aggregate_results.py --config scripts/configs/main.yaml
+    python scripts/aggregate_results.py --config scripts/configs/single_repeat.yaml
 """
 from __future__ import annotations
 
@@ -110,14 +110,15 @@ def _compound_proportion_per_npair(
 def _compound_proportion_all_loci(
     df: pd.DataFrame, figures_dir: Path,
 ) -> None:
-    """Single bridge-stacked heatmap pooling every (motif pair, N-pair)
-    locus as one observation per cell.  Each cell's proportion is the
-    fraction of those observations whose chosen alignment has
-    ``state ∈ {P, T}``."""
+    """Bridge-stacked heatmap pooling every motif pair at the symmetric
+    N-pairs (``N1 == N2``); asymmetric N-pair loci are excluded so the
+    pooled view does not commingle two distinct count regimes."""
+    df = df[df["N1"] == df["N2"]]
+    if df.empty:
+        return
     bridge_lengths = sorted(df["bridge_len"].unique())
     deltas1 = sorted(df["delta1"].unique())
     deltas2 = sorted(df["delta2"].unique())
-    # Count "loci" as (pind1, pind2, N1, N2) tuples for the caption.
     n_loci = df[["pind1", "pind2", "N1", "N2"]].drop_duplicates().shape[0]
     fig = plot_proportion_heatmap_2d_rows(
         df,
@@ -125,7 +126,8 @@ def _compound_proportion_all_loci(
         row_values=bridge_lengths, row_col="bridge_len",
         arm_titles=_ARM_TITLES,
         row_label_fn=lambda m: f"|M| = {m} bp",
-        suptitle="Compound cross-locus fraction with score = truth — all loci",
+        suptitle=("Compound cross-locus fraction with score = truth — "
+                  "symmetric N-pairs"),
         subtitle=f"each cell aggregates {n_loci} (motif pair × N-pair) loci",
         cbar_label="fraction of loci with score = truth",
     )
@@ -145,7 +147,7 @@ def _single_repeat_proportion_per_n(
             snv_label = "no SNV"
             snv_tag = "noSNV"
         else:
-            snv_label = f"SNV offset = {snv_offset}"
+            snv_label = f"SNV @ {int(snv_offset) + 1}"
             snv_tag = f"SNV{int(snv_offset):+d}"
         fig = plot_proportion_heatmap(
             sub,
@@ -168,12 +170,15 @@ def _single_repeat_proportion_snv_stack(
     deltas  = sorted(df["delta"].unique())
     lflanks = sorted(df["lflank"].unique())
     for N, sub_n in df.groupby("N"):
-        offsets = sorted(sub_n["snv_offset"].unique())
+        present = sub_n["snv_offset"].unique()
+        offsets = sorted([o for o in present if o != -1])
+        if -1 in present:
+            offsets = offsets + [-1]
         rows = [(off, sub_n[sub_n["snv_offset"] == off]) for off in offsets]
         n_loci = sub_n["pind"].nunique()
 
         def _row_label(off):
-            return "no SNV" if off == -1 else f"SNV @ {int(off)}"
+            return "no SNV" if off == -1 else f"SNV @ {int(off) + 1}"
 
         fig = plot_proportion_heatmap_rows(
             rows,
@@ -201,7 +206,7 @@ def _single_repeat_proportion_by_N(
     for snv_offset, sub in df.groupby("snv_offset"):
         rows = [(N, sub[sub["N"] == N]) for N in n_values]
         n_loci = sub["pind"].nunique()
-        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ +{int(snv_offset)}"
+        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ {int(snv_offset) + 1}"
         snv_tag = "noSNV" if snv_offset == -1 else f"SNV{int(snv_offset):+d}"
 
         fig = plot_proportion_heatmap_rows(
@@ -228,7 +233,7 @@ def _single_repeat_proportion_by_motif_length(
     motif_lengths = sorted(df["motif_len"].unique())
     for (N, snv_offset), sub in df.groupby(["N", "snv_offset"]):
         rows = [(L, sub[sub["motif_len"] == L]) for L in motif_lengths]
-        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ +{int(snv_offset)}"
+        snv_label = "no SNV" if snv_offset == -1 else f"SNV @ {int(snv_offset) + 1}"
         snv_tag = "noSNV" if snv_offset == -1 else f"SNV{int(snv_offset):+d}"
 
         fig = plot_proportion_heatmap_rows(

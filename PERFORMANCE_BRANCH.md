@@ -19,7 +19,7 @@ simulated haplotypes whose repeat count differs from the reference.
 **BWA-MEM at standard parameters** is mostly wrong on these reads:
 soft-clipping at the boundary consumes part of the flank and the
 repeat length is unmeasured. Under principled scoring (soft-clip
-charged the same affine-gap penalty as a deletion of the same
+charged the same affine-gap penalty as an insertion of the same
 length), the truth-shape alignment strictly outscores the soft-clip,
 so this is a heuristic-miss failure rather than a score-landscape
 one.
@@ -66,7 +66,7 @@ Throughout the notebooks we are careful to distinguish two scores:
 
 - **NW (Needleman-Wunsch / global) score** — affine-gap walked over
   a full CIGAR with soft-clips charged the same affine-gap penalty
-  as a deletion of the same length, computed via `score_alignment`
+  as an insertion of the same length, computed via `score_alignment`
   in `simulation.core`. NW score is well-defined for any CIGAR
   (BWA's output, NW-flex's output, or a constructed truth alignment)
   and matches NW-flex's reported `RefAligner` score by construction
@@ -191,7 +191,7 @@ repeat count varying over $N + \Delta$ for a small range of $\Delta$.
 
 NW-flex is uniformly **length-correct**. BWA-MEM at standard
 parameters is mostly *missed* — the heuristic chose a soft-clip
-alignment whose NW score (with soft-clip charged like a deletion)
+alignment whose NW score (with soft-clip charged like an insertion)
 sits below the truth-shape alignment's. A smaller band of cells
 still flips to *outscored*, reflecting reads where BWA-MEM picks a
 non-truth, non-clip alignment that beats truth on the score
@@ -264,9 +264,6 @@ is visible side by side. NW-flex remains correct by construction.
 ## Not included
 
 - No changes to the NW-flex core algorithm.
-- No full benchmarking harness or command-line sweep tooling. The
-  notebooks generate representative slices inline; larger-scale
-  results are deferred.
 - No external service or large-data dependency. The notebooks run on
   the committed panel TSV plus `bwa` and `samtools` on `PATH`; if
   those are missing, the BWA cells skip cleanly with an installation
@@ -281,18 +278,16 @@ to run, not for any one area to be finished first.
 **Notebook 7 — single repeat**
 - [x] Outline, introduction, setup
 - [x] Simulation setup — locus, haplotype, reads
-- [ ] Simulation setup — mirror frame (built; **in progress** moving it
-      out of the alignment-configurations section into setup)
+- [x] Simulation setup — mirror frame (in the setup section)
 - [x] Three alignment configurations (BWA std/no-clip + NW-flex, with
       closer-look and SW-vs-NW score explainer)
-- [ ] Verdict section — two-axis (length, score) framing with the
-      inequivalence-of-orientations material; currently still mixed
-      into the alignment-configurations section as the correctness
-      rule + score-columns + inequivalence subsections
+- [x] Verdict — two-axis (length, score) framing; lives as the
+      `### Correctness rule` subsection of the alignment-configurations
+      section, with the strand-inequivalence material in `### Mirror`
 - [x] First comparison — length variation
 - [x] Second comparison — SNV in flank (with the NW-flex tie/outscored
       diagnostic)
-- [ ] Summary
+- [x] Summary
 
 **Notebook 8 — compound repeat**
 - [x] Outline, setup, scoring carry-through
@@ -302,13 +297,13 @@ to run, not for any one area to be finished first.
 - [x] Correctness rule and truth-alignment helpers for compound
 - [x] $(\Delta_1, \Delta_2)$ sweep with per-arm heatmaps
 - [x] Bridge-length effect grid
-- [ ] Verdict section aligned to the two-axis framing once Notebook 7
-      lands it
-- [ ] Mirror frame for NW-flex symmetric treatment
-- [ ] Summary
+- [x] Verdict — `## Two-level correctness` (per-block length checks
+      plus the score relationship)
+- [x] Mirror frame for NW-flex symmetric treatment
+- [x] Summary
 
-**Package code** (lives in `nwflex/simulation/`, split into `core.py`
-and `viz.py`)
+**Package code** (lives in `nwflex/simulation/`, split into `core.py`,
+`viz.py`, and `sweep.py`)
 - [x] Default parameters for the score schemas in use
 - [x] Panel loading and locus construction
 - [x] Haplotype and read tiling
@@ -319,14 +314,18 @@ and `viz.py`)
       `rc_to_forward_alignment`
 - [x] Scoring helpers — `score_alignment`; `bwa_truth_cigar`,
       `nwflex_truth_cigar`
-- [x] Verdict helpers — `alignment_state`,
-      `bwa_state_both_strands`, `bwa_verdict_both_strands`
+- [x] Verdict helpers — `alignment_state`, `alignment_state_multi`,
+      `combine_states`, `state_to_glyph`
 - [x] Visualization — `render_zoom`, `plot_correctness_heatmap`
 - [x] Mirror frame — `build_mirror_frame`
 - [x] Compound-repeat helpers (`CompoundLocus`, multi-block EP,
       `is_arm_correct_multi`, compound truth-CIGAR builder)
-- [ ] NW-flex mirror wrapper that mirrors NW-flex's strand handling
-      under matched conditions (currently inline in notebook)
+- [x] NW-flex harness — `align_nwflex` / `NwflexResult` in `core.py`,
+      with strand handling driven by the mirror frame
+- [x] Sweep harness — `sweep.py`: `SweepVariant`, `make_variant`,
+      `sweep`, `pivot_for_heatmap`, the `BWAMethod` / `NWFlexMethod`
+      method classes (plus `BWACompoundMethod` / `NWFlexCompoundMethod`),
+      `wrap_methods_for_multizone_truth`, and `aggregate_per_cell`
 
 **Data and tests**
 - [x] Panel TSV in `data/`
@@ -334,11 +333,114 @@ and `viz.py`)
 - [x] Tests covering the simulation modules — see `tests/test_simulation.py`
 
 **Repo plumbing**
-- [ ] Add Notebook 7 and Notebook 8 to `notebooks/build_pdf.sh`
-- [ ] Note the `bwa` and `samtools` runtime requirements in the install
+- [x] Add Notebook 7 and Notebook 8 to `notebooks/build_pdf.sh`
+- [x] Note the `bwa` and `samtools` runtime requirements in the install
       docs
+
+**Scripts** (`scripts/`)
+- [x] Cross-locus batch sweep — `run_batch_sweep.py`, with
+      `aggregate_results.py` / `aggregate_per_locus_for_A.py` for
+      per-locus rollups and `sweep_viz.py` / `build_manuscript_figures.py`
+      / `build_stats_tables.py` for figures and tables
 
 **Later**
 - [x] Appendix notebook documenting TRF and panel construction
       (`Appendix_TRF.ipynb` exists; polish deferred)
-- [ ] Scripts for data generation at scale
+
+## Deferred follow-up work
+
+These items came out of the pre-merge code review but were scoped out
+of this PR.  Listed here so the next pass has a starting point.
+
+### Compound pipeline test coverage
+
+The single-zone code in `nwflex/simulation/` is well-covered
+(`tests/test_simulation.py`, 139 tests).  The compound pipeline ships
+with one test class (`TestIsArmCorrectMulti`) and is otherwise
+untested.  A focused follow-up should mirror the single-zone coverage
+for the compound surface.
+
+Three tiers, in priority order:
+
+**Tier 1 — Construction & invariants** (cheap, high-value; mirror
+existing single-zone tests, each 20-60 lines, no real aligner needed):
+- `TestBuildCompoundLocus` — verify `CompoundLocus` and
+  `build_compound_locus_from_panel`: flank lengths, bridge insertion
+  offset, ref sequence is $A \cdot R_1^{N_1} \cdot M \cdot R_2^{N_2}
+  \cdot B$, zone1 / zone2 endpoints, motif lengths.
+- `TestBuildCompoundHaplotype` — verify `build_compound_haplotype`
+  varies both repeat counts independently, produces correct
+  `hap_z1` / `hap_z2` intervals, total length matches the closed-form.
+- `TestBuildCompoundMirrorFrame` — verify the RC handling swaps zone
+  order, preserves the bridge as its own RC, and produces matching
+  read mirroring.
+- `TestAlignmentStateMulti` — P/T/M/D classification on multi-zone
+  alignments, especially the case where one zone is correct and the
+  other is not.
+
+**Tier 2 — Round-trip / scoring correctness** (catches scoring drift):
+- `TestBwaCompoundTruthCigar` — build a known compound truth CIGAR,
+  rescore it with `score_alignment`, verify the score matches a
+  cell-by-cell tally.  Cover zero-delta, single-block delta, and
+  both-block delta.
+- `TestNwflexCompoundTruthCigar` — same for the NW-flex truth path;
+  confirm the EP-pattern path scores to the truth.
+
+**Tier 3 — Sweep harness on compound** (mock-based, mirrors
+`TestSweep`):
+- `TestSweepCompound` — mock the alignment to return a known hit,
+  verify `BWACompoundMethod.classify` and
+  `NWFlexCompoundMethod.classify` produce the expected state.
+- (Optional) `TestWrapMethodsForMultizoneTruth` — verify the helper
+  composes a multi-zone method out of single-zone methods.
+
+**Scope estimate**: Tier 1 ≈ 250 lines / 12 tests; Tier 2 ≈ 120 lines
+/ 5 tests; Tier 3 ≈ 100 lines / 6 tests.  Total ≈ 470 lines, ≈ 23
+tests.  Tiers 1 and 2 are the priority pair — the compound
+construction and scoring is where the back-and-forth in commit
+`6dbec36` ("fixed reverse complement errors in compound alignment")
+landed.
+
+### Other deferred items
+
+- **NB7 `## Diagnostic — non-length-correct cells`.**  The plan
+  described a diagnostic cell that walks every NW-flex non-length-
+  correct cell and displays the chosen vs. truth CIGARs side by side.
+  Not added in this PR.
+- **NB8 per-read verdict table + SW-vs-NW worked example.**  NB7 has
+  these; NB8 forwards to NB7 for the SW-vs-NW arithmetic.  A compound
+  worked example would round out NB8.
+- **NB7 / NB8 execution-count cleanup.**  Both notebooks have
+  non-contiguous code-cell execution counts (NB7: `..., 18, 25, 20,
+  26`; NB8: `..., 17, 23, 19`) left over from rerunning individual
+  cells rather than _Kernel → Restart Kernel and Run All Cells_.
+  Outputs are fresh and the supplement PDF builds either way, but the
+  numbering will read odd to a careful reader.  Resolve before the
+  next supplement-PDF build.
+- **`scripts/sweep_viz.py` shim.**  After the heatmap consolidation
+  the 1D-proportion plotters live in `nwflex.simulation.viz`; this
+  file is now a thin re-export shim kept so existing `from sweep_viz
+  import …` callers (`scripts/aggregate_results.py`) keep working.
+  Optional: migrate the callers to import from `nwflex.simulation`
+  directly and delete the shim.
+
+### Completed during the code-review pass
+
+- **Pre-merge code review** across notebooks, package code, scripts,
+  and supplement.  Four parallel reviewers; structured findings;
+  ~50 items triaged into Critical / Important / Minor and worked.
+- **Heatmap function consolidation** — body duplication across the
+  eight `plot_*_heatmap*` variants collapsed via shared internal
+  helpers; public API unchanged; 11 representative renderings are
+  byte-identical before / after; commit `aee0867`.
+- **Data consolidation.** Retired the slim / `data_full/`
+  bifurcation; everything lives under one canonical
+  `supplement/data/` tree, fed by a pair of YAML configs
+  (`single_repeat.yaml`, `compound.yaml`).
+- **Stats-table writer.**  Underscore-escaping in column headers and
+  integer formatting for count columns, so the emitted `.tex` files
+  compile cleanly without `\usepackage{underscore}` and read as
+  `5420` rather than `5420.000`.
+- **CSV / TeX artifacts** untracked from the repo (`.gitignore` now
+  carries the globs); every regenerable artifact is produced by the
+  pipeline scripts on demand.

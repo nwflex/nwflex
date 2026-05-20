@@ -16,9 +16,16 @@ and produces a handful of focused tables, each emitted as both CSV
 - **motif_length_breakdown** — for compound: per-arm × motif-length-
   pair (L1, L2), the mean fraction of cells where score equals truth.
 
+The single-repeat cross-locus tables are restricted to trinucleotide
+(3-mer) loci — the primary focus of this analysis — so a pooled
+headline number is not silently weighted by the panel's motif-length
+composition (400 / 1,080 / 5,420 loci at length 1 / 2 / 3).
+``single_motif_length_breakdown`` is the exception, kept unfiltered as
+the deliberate motif-length view.
+
 Usage::
 
-    python scripts/build_stats_tables.py --config scripts/configs/main.yaml
+    python scripts/build_stats_tables.py --config scripts/configs/single_repeat.yaml
 """
 from __future__ import annotations
 
@@ -31,6 +38,11 @@ import yaml
 
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+
+# Single-repeat cross-locus tables are reported on the trinucleotide
+# slice — see the module docstring.  _single_motif_length_breakdown is
+# the deliberate exception (kept unfiltered).
+SINGLE_MOTIF_LEN = 3
 
 
 def load_config(path: Path) -> Mapping[str, Any]:
@@ -58,8 +70,22 @@ def _write_table(df: pd.DataFrame, out_dir: Path, name: str,
     csv_path = out_dir / f"{name}.csv"
     tex_path = out_dir / f"{name}.tex"
     df.to_csv(csv_path, index=False)
+    # Escape underscores in column names so they don't trigger
+    # "Missing $ inserted" in LaTeX text mode.  ``escape=False`` is
+    # kept so captions and labels (which contain ``$``, ``\Delta``,
+    # and already-escaped ``\_``) pass through unchanged.  Float
+    # columns whose non-null values are all integers get cast to
+    # ``Int64`` so counts render as ``5420`` not ``5420.000``.
+    df_tex = df.copy()
+    for col in df_tex.columns:
+        s = df_tex[col]
+        if s.dtype == "float64":
+            non_null = s.dropna()
+            if not non_null.empty and (non_null == non_null.astype(int)).all():
+                df_tex[col] = s.astype("Int64")
+    df_tex = df_tex.rename(columns=lambda c: c.replace("_", r"\_"))
     with tex_path.open("w") as f:
-        f.write(df.to_latex(
+        f.write(df_tex.to_latex(
             index=False,
             float_format=float_format,
             caption=caption,
@@ -334,7 +360,8 @@ def main() -> None:
     _write_table(
         recovery, tables_dir, "compound_recovery_by_bridge",
         caption=("Compound cross-locus recovery, per arm and bridge "
-                 "length: mean and quartile fractions of loci with "
+                 "length, pooled across motif-length pairs and "
+                 "N-pairs: mean and quartile fractions of loci with "
                  "score equal to truth, and the fraction of cells "
                  "reaching 95\\% / 100\\% agreement."),
         label="tab:compound-recovery-by-bridge",
@@ -374,9 +401,13 @@ def main() -> None:
         per_locus_compound, tables_dir, "compound_per_locus_distribution",
         caption=("Per-locus distribution of the fraction of "
                  "$(\\Delta_1, \\Delta_2)$ cells where score equals "
-                 "truth, taken across motif-pair loci.  "
-                 "``frac\\_loci\\_at\\_*`` answers \"what fraction of "
-                 "loci hit at least this success rate?\""),
+                 "truth, taken across motif-pair loci.  The "
+                 "``frac\\_loci\\_at\\_*`` columns "
+                 "(``frac\\_loci\\_at\\_100pct``, "
+                 "``frac\\_loci\\_at\\_95pct``, "
+                 "``frac\\_loci\\_at\\_50pct``) answer "
+                 "\"what fraction of loci hit at least this success "
+                 "rate?\""),
         label="tab:compound-per-locus-distribution",
     )
 
@@ -394,19 +425,40 @@ def main() -> None:
 def _maybe_single(sr_df, tables_dir: Path) -> None:
     if sr_df is None:
         return
-    sr_recovery = _single_recovery_by_n_snv(sr_df)
+
+    # Tables display the SNV position 1-indexed from the repeat
+    # boundary; the underlying CSV column is 0-indexed (k=0 means the
+    # base immediately adjacent to the boundary).  Sentinel -1 ("no
+    # SNV") is preserved.
+    sr_df = sr_df.assign(
+        snv_offset=sr_df["snv_offset"].where(
+            sr_df["snv_offset"] == -1, sr_df["snv_offset"] + 1
+        )
+    )
+
+    # The single-repeat panel is 400 / 1,080 / 5,420 loci at motif
+    # length 1 / 2 / 3, so any statistic pooled across motif length is
+    # ~79% trinucleotide by construction.  Rather than reweight, the
+    # cross-locus tables below are reported on the trinucleotide slice.
+    # _single_motif_length_breakdown
+    # is the deliberate exception: it stays unfiltered as the
+    # motif-length view.
+    sr_di = sr_df[sr_df["motif_len"] == SINGLE_MOTIF_LEN]
+
+    sr_recovery = _single_recovery_by_n_snv(sr_di)
     _write_table(
         sr_recovery, tables_dir, "single_recovery_by_N_snv",
         caption=("Single-repeat cross-locus recovery, per arm × $N$ × "
-                 "SNV offset.  ``snv\\_offset = -1`` means no SNV."),
+                 "SNV offset.  ``snv\\_offset = -1`` means no SNV.  "
+                 "Restricted to trinucleotide (3-mer) loci."),
         label="tab:single-recovery-by-N-snv",
     )
 
-    sr_asym = _single_strand_asymmetry(sr_df)
+    sr_asym = _single_strand_asymmetry(sr_di)
     _write_table(
         sr_asym, tables_dir, "single_strand_asymmetry",
         caption=("Single-repeat per-arm strand-asymmetry rate, broken "
-                 "out by SNV offset."),
+                 "out by SNV offset.  Trinucleotide (3-mer) loci only."),
         label="tab:single-strand-asymmetry",
     )
 
@@ -414,22 +466,28 @@ def _maybe_single(sr_df, tables_dir: Path) -> None:
     _write_table(
         sr_motif, tables_dir, "single_motif_length_breakdown",
         caption=("Mean fraction of locus cells in which score equals "
-                 "truth, stratified by motif length and SNV offset."),
+                 "truth, stratified by motif length and SNV offset.  "
+                 "This table spans all motif lengths (1--3); the other "
+                 "single-repeat tables are restricted to trinucleotides."),
         label="tab:single-motif-length-breakdown",
     )
 
-    sr_per_locus = _single_per_locus_distribution(sr_df)
+    sr_per_locus = _single_per_locus_distribution(sr_di)
     _write_table(
         sr_per_locus, tables_dir, "single_per_locus_distribution",
         caption=("Per-locus distribution of the fraction of "
                  "$(\\Delta, \\text{lflank})$ cells where score equals "
-                 "truth, across selected loci.  ``frac\\_loci\\_at\\_*"
-                 "`` answers \"what fraction of loci hit at least this "
-                 "success rate?\""),
+                 "truth, across selected loci.  The "
+                 "``frac\\_loci\\_at\\_*`` columns "
+                 "(``frac\\_loci\\_at\\_100pct``, "
+                 "``frac\\_loci\\_at\\_95pct``, "
+                 "``frac\\_loci\\_at\\_50pct``) answer "
+                 "\"what fraction of loci hit at least this success "
+                 "rate?\"  Trinucleotide (3-mer) loci only."),
         label="tab:single-per-locus-distribution",
     )
 
-    nwflex_t = _nwflex_t_breakdown(sr_df)
+    nwflex_t = _nwflex_t_breakdown(sr_di)
     _write_table(
         nwflex_t, tables_dir, "single_nwflex_T_breakdown",
         caption=("NW-flex failures in the single-repeat sweep: each "
@@ -437,7 +495,7 @@ def _maybe_single(sr_df, tables_dir: Path) -> None:
                  "least one locus did not land in state P, broken out "
                  "by SNV offset.  ``frac\\_T`` and ``frac\\_D`` are the "
                  "fraction of loci in the tied and dominated state "
-                 "respectively."),
+                 "respectively.  Trinucleotide (3-mer) loci only."),
         label="tab:single-nwflex-T-breakdown",
     )
 
