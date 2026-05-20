@@ -33,7 +33,6 @@ from nwflex.simulation import (
     CompoundLocus,
     NWFlexCompoundMethod,
     NWFlexMethod,
-    aggregate_per_cell,
     build_compound_haplotype,
     build_compound_mirror_frame,
     build_haplotype,
@@ -209,8 +208,9 @@ def run_compound_task(
     Builds the compound locus from explicit motif rows (independent of
     ``build_compound_locus_from_panel`` so we can pick exact motifs
     rather than ``.iloc[0]`` of a length filter); sweeps
-    ``(Δ1, Δ2)``; aggregates reads per cell; returns a tidy DataFrame
-    with one row per ``(delta1, delta2, arm)`` cell.
+    ``(Δ1, Δ2)``; returns a tidy DataFrame with one row per
+    ``(delta1, delta2, lflank, arm)`` read cell, retaining the full
+    lflank range and separate ``fwd_state`` / ``rc_state``.
     """
     bridge_n1, bridge_n2 = _split_bridge_length(bridge_len)
     A = clean_flank_window(motif1, panel_lflank_1, flank_len, "left")
@@ -270,22 +270,24 @@ def run_compound_task(
         variants,
         wrap_methods_for_multizone_truth(methods, variants),
     )
-    grid_df = pivot_for_heatmap(long_df, combine="best")
-    cell_df = aggregate_per_cell(grid_df, ["arm", "delta1", "delta2"])
+    # Retain per-read rows (one per (delta1, delta2, lflank, arm), full
+    # lflank range) so downstream can pool reads under the length-only
+    # correctness metric. fwd_state / rc_state stay separate.
+    out_df = pivot_for_heatmap(long_df, combine="best")
 
-    cell_df["pind1"] = pind1
-    cell_df["pind2"] = pind2
-    cell_df["motif1"] = motif1
-    cell_df["motif2"] = motif2
-    cell_df["motif1_len"] = len(motif1)
-    cell_df["motif2_len"] = len(motif2)
-    cell_df["N1"] = N1
-    cell_df["N2"] = N2
-    cell_df["bridge_len"] = bridge_len
-    cell_df["bridge_n1"] = bridge_n1
-    cell_df["bridge_n2"] = bridge_n2
-    cell_df["sweep_kind"] = "compound"
-    return cell_df
+    out_df["pind1"] = pind1
+    out_df["pind2"] = pind2
+    out_df["motif1"] = motif1
+    out_df["motif2"] = motif2
+    out_df["motif1_len"] = len(motif1)
+    out_df["motif2_len"] = len(motif2)
+    out_df["N1"] = N1
+    out_df["N2"] = N2
+    out_df["bridge_len"] = bridge_len
+    out_df["bridge_n1"] = bridge_n1
+    out_df["bridge_n2"] = bridge_n2
+    out_df["sweep_kind"] = "compound"
+    return out_df
 
 
 def load_config(path: Path) -> Mapping[str, Any]:

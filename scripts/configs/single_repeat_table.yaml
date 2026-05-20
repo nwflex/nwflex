@@ -1,0 +1,31 @@
+# Table 1A: single-repeat full-lflank sweep — N=10, tri loci, no-SNV + SNV@1.
+# target_lflanks: null = full lflank range. Writes to supplement/data_perread/.
+
+seed: 20260512
+
+panel: data/hg38_motif_sample_K100.tsv
+
+single_repeat:
+  motif_lengths: [3]          # trinucleotide only
+  loci_per_length: 6000       # > 5,420 tri loci -> selects ALL of them
+  N_values: [10]
+  delta_range: [-5, 5]
+  snv_positions: [null, 0]    # no-SNV and SNV @ 1 (1-indexed) = offset 0
+  read_len: 150
+  k_min_flank: 1
+  target_lflanks: null        # FULL lflank range
+
+compound:
+  motif_length_pairs: []
+  pairs_per_length_pair: 0
+  N_pairs: []
+  bridge_lengths: []
+  delta1_range: [-5, 5]
+  delta2_range: [-5, 5]
+  read_len: 150
+  k_min_flank: 1
+
+output:
+  data_dir: supplement/data_perread
+  figures_dir: supplement/figures
+  tables_dir: supplement/tables
