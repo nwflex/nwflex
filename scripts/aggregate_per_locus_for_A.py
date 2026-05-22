@@ -101,13 +101,19 @@ def main():
         "--config", type=Path, default=DEFAULT_CONFIG,
         help="YAML config; reads output.data_dir and panel keys.",
     )
+    parser.add_argument("--single-dir", type=Path, default=None,
+                        help="Override single-repeat shard dir.")
+    parser.add_argument("--compound-dir", type=Path, default=None,
+                        help="Override compound shard dir.")
+    parser.add_argument("--out-dir", type=Path, default=None,
+                        help="Override output dir for the A*.csv files.")
     args = parser.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
     data_dir = (REPO_ROOT / cfg["output"]["data_dir"]).resolve()
-    SINGLE_SHARDS = data_dir / "single_repeat"
-    COMPOUND_SHARDS = data_dir / "compound"
-    OUT_DIR = data_dir
+    SINGLE_SHARDS = args.single_dir or (data_dir / "single_repeat")
+    COMPOUND_SHARDS = args.compound_dir or (data_dir / "compound")
+    OUT_DIR = args.out_dir or data_dir
     PANEL_PATH = (REPO_ROOT / cfg["panel"]).resolve()
 
     OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -120,10 +126,16 @@ def main():
     single_files = _filter_single_shards(target_pinds)
     print(f"single-locus: reading {len(single_files)} shards "
           f"(filtered from full set)...", flush=True)
-    usecols = ["pind", "N", "snv_offset", "arm", "delta", "lflank", "state"]
+    usecols = ["pind", "N", "snv_offset", "arm", "delta", "lflank",
+               "fwd_state", "rc_state"]
     s_df = _read_concat(single_files, usecols, "single")
-    s_df = s_df.assign(correct=s_df["state"].isin(["P", "T"]).astype(float))
-    print(f"single-locus: loaded {len(s_df):,} rows", flush=True)
+    # length-only correctness (state P), pooled over strands: each strand
+    # contributes one observation.
+    s_df = pd.concat([
+        s_df.assign(correct=(s_df["fwd_state"] == "P").astype(float)),
+        s_df.assign(correct=(s_df["rc_state"] == "P").astype(float)),
+    ], ignore_index=True)
+    print(f"single-locus: loaded {len(s_df):,} rows (x2 strands)", flush=True)
 
     # A1 — per (pind, arm, delta) over snv=-1, all N, all lflank
     a1 = (s_df[s_df["snv_offset"] == -1]
@@ -152,10 +164,15 @@ def main():
           f"(L1={COMPOUND_L1L2[0]}, L2={COMPOUND_L1L2[1]}, "
           f"N1=N2=10)...", flush=True)
     usecols = ["pind1", "pind2", "bridge_len",
-               "arm", "delta1", "delta2", "state"]
+               "arm", "delta1", "delta2", "fwd_state", "rc_state"]
     c_df = _read_concat(compound_files, usecols, "compound")
-    c_df = c_df.assign(correct=c_df["state"].isin(["P", "T"]).astype(float))
-    print(f"compound: loaded {len(c_df):,} rows", flush=True)
+    # exclude the (0,0) reference allele; length-only correctness, pooled strands
+    c_df = c_df[~((c_df["delta1"] == 0) & (c_df["delta2"] == 0))]
+    c_df = pd.concat([
+        c_df.assign(correct=(c_df["fwd_state"] == "P").astype(float)),
+        c_df.assign(correct=(c_df["rc_state"] == "P").astype(float)),
+    ], ignore_index=True)
+    print(f"compound: loaded {len(c_df):,} rows (x2 strands, (0,0) excluded)", flush=True)
 
     a4 = (c_df.groupby(["pind1", "pind2", "arm", "bridge_len"],
                         dropna=False, sort=False)

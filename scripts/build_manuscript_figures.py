@@ -65,12 +65,13 @@ def _weighted_mean(g, col, w="n_loci"):
 
 
 def pool_single(df: pd.DataFrame, keep: list[str]) -> pd.DataFrame:
-    """Group by ``keep`` keys, weighted-average per-strand fractions."""
+    """Group by ``keep`` keys, weighted-average per-strand length-correct
+    fractions (state P)."""
     g = df.groupby(keep, dropna=False, sort=False)
     pooled = g.apply(
         lambda d: pd.Series({
-            "fwd": _weighted_mean(d, "frac_score_eq_truth_fwd"),
-            "rc":  _weighted_mean(d, "frac_score_eq_truth_rc"),
+            "fwd": _weighted_mean(d, "frac_P_fwd"),
+            "rc":  _weighted_mean(d, "frac_P_rc"),
             "n":   d["n_loci"].sum(),
         }),
         include_groups=False,
@@ -263,15 +264,15 @@ def build_fig1(motif_len: int = SINGLE_MOTIF_LEN):
 def build_fig2(N_value: int, motif_len: int = SINGLE_MOTIF_LEN):
     """Single, SNV stack at fixed N; columns = SNV positions (1-indexed).
 
-    Columns show positions 1, 2, 5, 10 (bases from repeat boundary,
-    1-indexed) = snv_offset values 0, 1, 4, 9 in the raw data.
+    Columns show positions 1, 2, 3, 5 (bases from repeat boundary,
+    1-indexed) = snv_offset values 0, 1, 2, 4 in the raw data.
     Call once per motif length; saved to motif_L{motif_len}/ subdir."""
     df = pd.read_csv(SINGLE_CSV)
     df = df[df["N"] == N_value]
     df = df[df["motif_len"] == motif_len]
     pooled = pool_single(df, keep=["arm", "snv_offset", "delta", "lflank"])
-    snv_cols = [0, 1, 4, 9]
-    snv_labels = ["SNV @ 1", "SNV @ 2", "SNV @ 5", "SNV @ 10"]
+    snv_cols = [0, 1, 2, 4]
+    snv_labels = ["SNV @ 1", "SNV @ 2", "SNV @ 3", "SNV @ 5"]
     deltas = sorted(pooled["delta"].unique())
     lflanks = sorted(pooled["lflank"].unique())
 
@@ -303,16 +304,10 @@ def build_fig2(N_value: int, motif_len: int = SINGLE_MOTIF_LEN):
     _save(fig, f"fig2__single_snv_stack_N{N_value:02d}", subdir=f"motif_L{motif_len}")
 
 
-def _load_compound_for_monodi():
+def _load_compound_ditri():
     df = pd.read_csv(COMPOUND_CSV)
-    # (mono, di) and (di, mono) both, at N1=N2=10
-    mask = (
-        (df["N1"] == 10) & (df["N2"] == 10) &
-        (
-            ((df["motif1_len"] == 1) & (df["motif2_len"] == 2)) |
-            ((df["motif1_len"] == 2) & (df["motif2_len"] == 1))
-        )
-    )
+    mask = ((df["N1"] == 10) & (df["N2"] == 10) &
+            (df["motif1_len"] == 2) & (df["motif2_len"] == 3))
     return df[mask].copy()
 
 
@@ -320,8 +315,8 @@ def _pool_compound(df: pd.DataFrame, keep: list[str]) -> pd.DataFrame:
     g = df.groupby(keep, dropna=False, sort=False)
     pooled = g.apply(
         lambda d: pd.Series({
-            "fwd": _weighted_mean(d, "frac_score_eq_truth_fwd"),
-            "rc":  _weighted_mean(d, "frac_score_eq_truth_rc"),
+            "fwd": _weighted_mean(d, "frac_P_fwd"),
+            "rc":  _weighted_mean(d, "frac_P_rc"),
             "n":   d["n_loci"].sum(),
         }),
         include_groups=False,
@@ -330,13 +325,13 @@ def _pool_compound(df: pd.DataFrame, keep: list[str]) -> pd.DataFrame:
 
 
 def build_fig3():
-    """Compound (mono, di) bridge stack; columns = |M|."""
-    df = _load_compound_for_monodi()
+    """Compound (di, tri) bridge stack; columns = |M|."""
+    df = _load_compound_ditri()
     if df.empty:
-        print("  fig3: no (1,2)+(2,1) data yet — large_transposed pending")
+        print("  fig3: no (di, tri) compound data")
         return
     pooled = _pool_compound(df, keep=["arm", "bridge_len", "delta1", "delta2"])
-    bridges = [1, 2, 3, 5]
+    bridges = [1, 2, 3, 4, 5]
     deltas1 = sorted(pooled["delta1"].unique())
     deltas2 = sorted(pooled["delta2"].unique())
 
@@ -365,7 +360,7 @@ def build_fig3():
         hspace=0.068,
     )
     _add_colorbar_and_legend(fig, cmap, norm)
-    _save(fig, "fig3__compound_monodi_bridge_stack")
+    _save(fig, "fig3__compound_ditri_bridge_stack")
 
 
 def build_fig4(M: int):
@@ -533,22 +528,47 @@ def _build_single_panel(pool_df, x_col, x_label, *, outname,
     _save(fig, outname)
 
 
+def _build_snv_panel(pool_df, *, outname):
+    """Panel C: correctness vs SNV position, equal-spaced with a broken
+    x-axis between positions 5 and 10. Positions shown 1,2,3,4,5,10,none
+    (offsets 0,1,2,3,4,9,-1); positions 6 and 11 are omitted."""
+    xmap = {0: 0, 1: 1, 2: 2, 3: 3, 4: 4, 9: 5, -1: 6}
+    df = pool_df[pool_df["snv_offset"].isin(xmap)].copy()
+    df["x_pos"] = df["snv_offset"].map(xmap)
+    fig, (axL, axR) = plt.subplots(
+        1, 2, sharey=True, figsize=(5.5, 4.2),
+        gridspec_kw={"width_ratios": [5, 2], "wspace": 0.06})
+    fig.patch.set_facecolor("white")
+    fig.subplots_adjust(bottom=0.15, left=0.12, right=0.97, top=0.95)
+    _plot_arm_lines(axL, df, "x_pos", "", show_legend=True, show_ylabel=True)
+    _plot_arm_lines(axR, df, "x_pos", "", show_legend=False, show_ylabel=False)
+    axL.set_xlim(-0.4, 4.4)
+    axR.set_xlim(4.6, 6.4)
+    axL.set_xticks([0, 1, 2, 3, 4])
+    axL.set_xticklabels(["1", "2", "3", "4", "5"])
+    axR.set_xticks([5, 6])
+    axR.set_xticklabels(["10", "none"])
+    axL.spines["right"].set_visible(False)
+    axR.spines["left"].set_visible(False)
+    axR.tick_params(axis="y", which="both", left=False)
+    d = 0.015
+    kw = dict(transform=axL.transAxes, color="k", clip_on=False, lw=1)
+    axL.plot((1 - d, 1 + d), (-d, +d), **kw)
+    axL.plot((1 - d, 1 + d), (1 - d, 1 + d), **kw)
+    kw = dict(transform=axR.transAxes, color="k", clip_on=False, lw=1)
+    axR.plot((-3 * d, 3 * d), (-d, +d), **kw)
+    axR.plot((-3 * d, 3 * d), (1 - d, 1 + d), **kw)
+    fig.text(0.5, 0.03, "SNV position", ha="center", fontsize=14)
+    _save(fig, outname)
+
+
 def build_A_panels():
     """Four standalone PDFs — one per panel — for LaTeX assembly via
     ``supplement/tex/aggregate_figure.tex``.  Only the first PDF
     carries the legend; the LaTeX wrapper labels the panels."""
     A1_pool = _per_locus_summary(pd.read_csv(A1_PER_LOCUS_CSV), "delta")
     A2_pool = _per_locus_summary(pd.read_csv(A2_PER_LOCUS_CSV), "lflank")
-    A3_raw = pd.read_csv(A3_PER_LOCUS_CSV)
-    A3_pool_raw = _per_locus_summary(A3_raw, "snv_offset")
-    # snv_offset is 0-indexed in the shards; display as 1-indexed
-    # position with -1 (no-SNV baseline) at the end labeled "none".
-    nums = sorted(v for v in A3_pool_raw["snv_offset"].unique() if v != -1)
-    has_none = -1 in A3_pool_raw["snv_offset"].values
-    snv_order = nums + ([-1] if has_none else [])
-    snv_pos = {v: i for i, v in enumerate(snv_order)}
-    A3_pool = A3_pool_raw.copy()
-    A3_pool["x_pos"] = A3_pool["snv_offset"].map(snv_pos)
+    A3_pool = _per_locus_summary(pd.read_csv(A3_PER_LOCUS_CSV), "snv_offset")
     A4_pool = _per_locus_summary(pd.read_csv(A4_PER_LOCUS_CSV), "bridge_len")
 
     _build_single_panel(
@@ -559,12 +579,7 @@ def build_A_panels():
         A2_pool, "lflank", "Flank Extent",
         outname="B__flank", show_legend=True,
     )
-    _build_single_panel(
-        A3_pool, "x_pos", "SNV position",
-        xticks=list(snv_pos.values()),
-        xticklabels=["none" if v == -1 else str(v + 1) for v in snv_order],
-        outname="C__snv", show_legend=True,
-    )
+    _build_snv_panel(A3_pool, outname="C__snv")
     _build_single_panel(
         A4_pool, "bridge_len", "length of |M|",
         xticks=sorted(A4_pool["bridge_len"].unique()),

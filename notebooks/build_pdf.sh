@@ -105,7 +105,7 @@ for nb in "${NOTEBOOKS[@]}"; do
 done
 
 if command -v nbmerge &> /dev/null; then
-    nbmerge "${TEMP_NOTEBOOKS[@]}" -o "$OUTPUT_DIR/$MERGED_NOTEBOOK"
+    nbmerge "${TEMP_NOTEBOOKS[@]}" -o "$MERGED_NOTEBOOK"
 else
     python -c "
 from nbmerge import merge_notebooks
@@ -118,12 +118,12 @@ for f in sys.argv[1:-1]:
 
 merged = merge_notebooks('.', nbs)
 nbformat.write(merged, sys.argv[-1])
-" "${TEMP_NOTEBOOKS[@]}" "$OUTPUT_DIR/$MERGED_NOTEBOOK"
+" "${TEMP_NOTEBOOKS[@]}" "$MERGED_NOTEBOOK"
 fi
 
 # Clean up temp files
 rm -f "${TEMP_NOTEBOOKS[@]}"
-echo "  Created: $OUTPUT_DIR/$MERGED_NOTEBOOK"
+echo "  Created: $MERGED_NOTEBOOK"
 
 # Step 2: Inject configuration cell at the front (for vector graphics if requested)
 echo ""
@@ -141,7 +141,7 @@ python -c "
 import nbformat
 import sys
 
-nb = nbformat.read('$OUTPUT_DIR/$MERGED_NOTEBOOK', as_version=4)
+nb = nbformat.read('$MERGED_NOTEBOOK', as_version=4)
 
 # Create config cell
 config_cell = nbformat.v4.new_code_cell('''$CONFIG_CODE''')
@@ -150,7 +150,7 @@ config_cell['metadata'] = {'tags': ['injected-config']}
 # Insert at position 1 (after the raw LaTeX cell)
 nb.cells.insert(1, config_cell)
 
-nbformat.write(nb, '$OUTPUT_DIR/$MERGED_NOTEBOOK')
+nbformat.write(nb, '$MERGED_NOTEBOOK')
 print('  Injected config cell')
 "
 
@@ -163,7 +163,7 @@ if [ "$SKIP_EXECUTE" = false ]; then
     
     jupyter nbconvert --to notebook --execute --inplace \
         --ExecutePreprocessor.timeout=1800 \
-        "$OUTPUT_DIR/$MERGED_NOTEBOOK"
+        "$MERGED_NOTEBOOK"
     echo "  Execution complete"
 else
     echo ""
@@ -182,7 +182,7 @@ if [ "$USE_VECTOR" = true ]; then
     echo "  Using LaTeX conversion for vector graphics..."
     
     # Convert to LaTeX first (preserves vector graphics better)
-    jupyter nbconvert --to latex "$OUTPUT_DIR/$MERGED_NOTEBOOK" \
+    jupyter nbconvert --to latex "$MERGED_NOTEBOOK" \
         --output-dir="$OUTPUT_DIR" \
         --output="$OUTPUT_PDF" \
         --no-prompt \
@@ -199,7 +199,7 @@ if [ "$USE_VECTOR" = true ]; then
     cd ..
 else
     # Direct PDF conversion (standard approach)
-    jupyter nbconvert --to pdf "$OUTPUT_DIR/$MERGED_NOTEBOOK" \
+    jupyter nbconvert --to pdf "$MERGED_NOTEBOOK" \
         --output-dir="$OUTPUT_DIR" \
         --output="$OUTPUT_PDF" \
         --TemplateExporter.extra_template_basedirs="$(pwd)" \
