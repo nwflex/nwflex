@@ -56,25 +56,23 @@ Thumbs.db
 ._*
 
 # images
-*.png 
+*.png
 *.gif
+# ...except curated README figures
+!docs/images/*.png
 
 # pdfs from notebooks
 notebooks/pdfs
 
-# Batch sweep outputs — every CSV and TeX artifact is regenerable from
-# scripts/run_batch_sweep.py + scripts/aggregate_results.py +
-# scripts/aggregate_per_locus_for_A.py + scripts/build_manuscript_figures.py +
-# scripts/build_stats_tables.py.  None of them are tracked.
-#
-# What is tracked from supplement/:
-#   - supplement/figures_priority/*.pdf            (manuscript figures)
-# The LaTeX assemblers (fig1.tex, fig2.tex, fig3.tex, fig4.tex,
-# figA.tex) live in the companion nwflex_TNG repo under tex/, next to
-# main.tex.  Everything else under supplement/ is gitignored below.
-#
-# (PNG previews of every figure are already covered by the global
-# *.png rule above.)
+# Generated merged supplement notebook (built by notebooks/build_pdf.sh)
+notebooks/NW-flex_Notebook_Supplement.ipynb
+
+# Generated outputs — nothing under supplement/ is tracked. The sweep
+# shards, aggregate CSVs, tables, and manuscript figures are all
+# regenerable from scripts/run_batch_sweep.py + scripts/aggregate_results.py
+# + scripts/aggregate_per_locus_for_A.py + scripts/build_manuscript_figures.py.
+# The tracked copies of the paper figures live in the companion nwflex_TNG
+# repo under tex/, next to main.tex.
 
 *.csv
 *.tex
@@ -82,6 +80,7 @@ notebooks/pdfs
 supplement/data/single_repeat/
 supplement/data/compound/
 supplement/figures/
+supplement/figures_priority/
 supplement/figures_full/
 supplement/figures_full_priority/
 

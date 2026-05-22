@@ -15,8 +15,10 @@ The expected workflow is:
 4. :func:`filter_isolated_repeats` — drop repeats that overlap others
    or sit too close to a neighbor; optionally restrict by period size
    or "perfect" (single-base) mono-repeats.
-5. The resulting DataFrame is the input to panel-building code that
-   downstream simulation modules can consume.
+5. :func:`build_target_table` — extract flanks and repeat sequence from
+   an indexed reference FASTA.
+6. :func:`build_panel_table` — emit the compact panel schema used by
+   downstream simulation modules.
 
 Chromosome lengths needed by step 3 can be read from a FASTA's
 ``.fai`` index via :func:`read_chrom_lengths` (the index is generated
@@ -26,6 +28,7 @@ on demand by ``samtools faidx`` if missing).
 from __future__ import annotations
 
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -237,6 +240,156 @@ def filter_isolated_repeats(
         is_pure = df["repeat_sequence"].apply(lambda s: len(set(s.upper())) == 1)
         mask &= ~is_mono | is_pure
     return df.loc[mask].copy()
+
+
+# ============================================================================
+# PANEL CONSTRUCTION
+# ============================================================================
+
+def classify_isolated_repeats(df: pd.DataFrame) -> pd.Series:
+    """
+    Classify annotated TRF rows by isolation and purity.
+
+    Rows with no overlapping/nested repeat, at least 100 bp to the nearest
+    neighboring repeat on both sides, and ``pct_matches == 100`` are labeled
+    ``"iso_pure"``. Isolated rows below 100% TRF identity are labeled
+    ``"iso_imperfect"``. All other rows are labeled ``"drop"``.
+    """
+    nested = (df["start_cover"].values > 1) | (df["end_cover"].values > 0)
+    isolated = (df["ldist"].values >= 100) & (df["rdist"].values >= 100)
+    pure = df["pct_matches"].values == 100
+    labels = pd.Series("drop", index=df.index, dtype=object)
+    labels[~nested & isolated & pure] = "iso_pure"
+    labels[~nested & isolated & ~pure] = "iso_imperfect"
+    return labels
+
+
+@dataclass(frozen=True)
+class _FaiRecord:
+    length: int
+    offset: int
+    line_bases: int
+    line_width: int
+
+
+def _read_fai_records(fasta_path: Path) -> Dict[str, _FaiRecord]:
+    fai_path = Path(str(fasta_path) + ".fai")
+    if not fai_path.exists():
+        subprocess.run(["samtools", "faidx", str(fasta_path)], check=True)
+    records: Dict[str, _FaiRecord] = {}
+    with open(fai_path) as fh:
+        for line in fh:
+            parts = line.rstrip("\n").split("\t")
+            if len(parts) >= 5:
+                records[parts[0]] = _FaiRecord(
+                    length=int(parts[1]),
+                    offset=int(parts[2]),
+                    line_bases=int(parts[3]),
+                    line_width=int(parts[4]),
+                )
+    return records
+
+
+class _IndexedFasta:
+    """Minimal FASTA index reader for interval fetches."""
+
+    def __init__(self, fasta_path) -> None:
+        self.fasta_path = Path(fasta_path)
+        if not self.fasta_path.exists():
+            raise FileNotFoundError(f"FASTA not found: {self.fasta_path}")
+        self.records = _read_fai_records(self.fasta_path)
+        self._fh = None
+
+    def __enter__(self):
+        self._fh = open(self.fasta_path, "rb")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        if self._fh is not None:
+            self._fh.close()
+        self._fh = None
+
+    def fetch(self, chrom: str, start: int, end: int) -> str:
+        if self._fh is None:
+            raise RuntimeError("_IndexedFasta must be used as a context manager")
+        if chrom not in self.records:
+            raise KeyError(f"Chromosome {chrom!r} not found in {self.fasta_path}.fai")
+        rec = self.records[chrom]
+        start = max(0, int(start))
+        end = min(rec.length, int(end))
+        if end <= start:
+            return ""
+        byte_start = (
+            rec.offset
+            + (start // rec.line_bases) * rec.line_width
+            + (start % rec.line_bases)
+        )
+        n_bases = end - start
+        n_lines = (
+            start % rec.line_bases + n_bases + rec.line_bases - 1
+        ) // rec.line_bases
+        n_bytes = n_bases + n_lines * (rec.line_width - rec.line_bases)
+        self._fh.seek(byte_start)
+        raw = self._fh.read(n_bytes)
+        seq = raw.replace(b"\n", b"").replace(b"\r", b"")[:n_bases]
+        return seq.decode("ascii").upper()
+
+
+def build_target_table(
+    df: pd.DataFrame,
+    fasta_path,
+    *,
+    flank_size: int = 500,
+) -> pd.DataFrame:
+    """
+    Extract flanking sequence and repeat sequence for TRF loci.
+
+    ``df`` must contain ``chrom``, ``start``, ``end``, and
+    ``consensus_pattern`` columns. The returned copy adds ``lflank``,
+    ``rflank``, ``ms_seq``, ``motif``, and ``repeat_len``.
+    """
+    out = df.copy()
+    lflanks = []
+    rflanks = []
+    ms_seqs = []
+    with _IndexedFasta(fasta_path) as fa:
+        for _, row in out.iterrows():
+            chrom = row["chrom"]
+            start = int(row["start"])
+            end = int(row["end"])
+            chrom_len = fa.records[chrom].length
+            lflanks.append(fa.fetch(chrom, max(0, start - flank_size), start))
+            rflanks.append(fa.fetch(chrom, end, min(chrom_len, end + flank_size)))
+            ms_seqs.append(fa.fetch(chrom, start, end))
+    out["lflank"] = lflanks
+    out["rflank"] = rflanks
+    out["ms_seq"] = ms_seqs
+    out["motif"] = out["consensus_pattern"]
+    out["repeat_len"] = out["end"] - out["start"]
+    return out
+
+
+def build_panel_table(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Convert a target table to the current panel schema used by simulations.
+
+    ``ref_score_per_base`` is set from TRF identity:
+    ``pct_matches / 100``. This fast sentinel mirrors the historical large
+    panel builder and avoids an alignment round trip for every locus.
+    """
+    panel = df.sort_values(["chrom", "start"]).reset_index(drop=True)
+    return pd.DataFrame({
+        "pind": range(len(panel)),
+        "chr": panel["chrom"],
+        "start_38": panel["start"],
+        "stop_38": panel["end"],
+        "strand": panel.get("strand", "+"),
+        "type": panel["motif"],
+        "lflank": panel["lflank"],
+        "rflank": panel["rflank"],
+        "ms_seq": panel["ms_seq"],
+        "ref_score_per_base": (panel["pct_matches"].astype(float) / 100.0).round(4),
+    })
 
 
 # ============================================================================

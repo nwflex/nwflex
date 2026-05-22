@@ -1,7 +1,8 @@
 # test_trf.py
 #
-# Tests for nwflex.trf — TRF parsing, isolation annotation, and filtering.
-# Uses the small chr21 snippet fixture in data/chr21_snippet.dat (10 rows).
+# Tests for nwflex.trf — TRF parsing, isolation annotation, filtering,
+# and panel construction. Uses the small chr21 snippet fixture
+# in data/chr21_snippet.dat (10 rows).
 
 from __future__ import annotations
 
@@ -12,6 +13,9 @@ import pytest
 
 from nwflex.trf import (
     annotate_repeat_isolation,
+    build_panel_table,
+    build_target_table,
+    classify_isolated_repeats,
     filter_isolated_repeats,
     parse_trf_dat,
     read_chrom_lengths,
@@ -43,7 +47,7 @@ class TestParseTrfDat:
         assert (df["chrom"] == "chr21").all()
 
     def test_start_is_zero_based(self):
-        # First fixture line: TRF emits 1-based start 5016248 → 0-based 5016247.
+        # First fixture line: TRF emits 1-based start 5016248 -> 0-based 5016247.
         df = parse_trf_dat(TRF_DAT)
         assert df.iloc[0]["start"] == 5016247
         assert df.iloc[0]["end"] == 5016270
@@ -139,6 +143,71 @@ class TestFilterIsolatedRepeats:
             out_index = out.index[0]
             out.loc[out_index, "start"] = -1
             assert ann.loc[out_index, "start"] != -1
+
+
+# ============================================================================
+# PANEL CONSTRUCTION
+# ============================================================================
+
+class TestPanelConstruction:
+    def test_classify_isolated_repeats(self):
+        df = pd.DataFrame({
+            "start_cover": [1, 1, 2, 1],
+            "end_cover": [0, 0, 0, 1],
+            "ldist": [100, 120, 100, 100],
+            "rdist": [100, 120, 100, 100],
+            "pct_matches": [100.0, 95.0, 100.0, 100.0],
+        })
+        labels = classify_isolated_repeats(df)
+        assert labels.tolist() == ["iso_pure", "iso_imperfect", "drop", "drop"]
+
+    def test_build_target_table_fetches_flanks(self, tmp_path):
+        fasta = tmp_path / "tiny.fa"
+        fasta.write_text(">chrT\nAAAACCCCGGGGTTTT\n")
+        fasta.with_suffix(".fa.fai").write_text("chrT\t16\t6\t16\t17\n")
+        df = pd.DataFrame({
+            "chrom": ["chrT"],
+            "start": [4],
+            "end": [8],
+            "consensus_pattern": ["C"],
+            "pct_matches": [100.0],
+        })
+        out = build_target_table(df, fasta, flank_size=3)
+        row = out.iloc[0]
+        assert row["lflank"] == "AAA"
+        assert row["ms_seq"] == "CCCC"
+        assert row["rflank"] == "GGG"
+        assert row["motif"] == "C"
+        assert row["repeat_len"] == 4
+
+    def test_build_panel_table_schema(self):
+        targets = pd.DataFrame({
+            "chrom": ["chrT"],
+            "start": [4],
+            "end": [8],
+            "motif": ["C"],
+            "lflank": ["AAA"],
+            "rflank": ["GGG"],
+            "ms_seq": ["CCCC"],
+            "pct_matches": [100.0],
+        })
+        panel = build_panel_table(targets)
+        assert list(panel.columns) == [
+            "pind", "chr", "start_38", "stop_38", "strand", "type",
+            "lflank", "rflank", "ms_seq", "ref_score_per_base",
+        ]
+        assert panel.iloc[0].to_dict() == {
+            "pind": 0,
+            "chr": "chrT",
+            "start_38": 4,
+            "stop_38": 8,
+            "strand": "+",
+            "type": "C",
+            "lflank": "AAA",
+            "rflank": "GGG",
+            "ms_seq": "CCCC",
+            "ref_score_per_base": 1.0,
+        }
 
 
 # ============================================================================

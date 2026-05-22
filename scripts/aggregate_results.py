@@ -12,8 +12,8 @@ Reads ``supplement/data/{single_repeat,compound}/*.csv`` written by
 - **Compound all-loci aggregate** — a single bridge-stacked heatmap
   pooling every motif pair × N-pair.
 - **Single-repeat cross-locus heatmaps** — one per ``(N, snv_offset)``
-  combination, using the local
-  :func:`scripts.sweep_viz.plot_proportion_heatmap` on
+  combination, using
+  :func:`nwflex.simulation.viz.plot_proportion_heatmap` on
   ``(Δ × lflank)`` axes.
 - **Tidy aggregate CSVs** — per-cell fraction-by-state tables.
 
@@ -24,7 +24,6 @@ Usage::
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -39,10 +38,7 @@ from nwflex.simulation import (
     plot_proportion_heatmap_2d_rows,
 )
 
-# Local 1-D continuous-color heatmap; kept out of the package until the
-# in-flight viz refactor stabilizes.
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from sweep_viz import (  # noqa: E402
+from nwflex.simulation.viz import (
     plot_proportion_heatmap,
     plot_proportion_heatmap_rows,
 )

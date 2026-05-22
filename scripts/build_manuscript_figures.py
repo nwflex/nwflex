@@ -9,16 +9,22 @@ Layout convention (all four figure families):
 Figures:
   1. single-repeat, no SNV, columns = N
   2. single-repeat, SNV stack at fixed N (one figure per N)
-  3. compound, (mono, di) length pair, columns = |M|
+  3. compound, (di, tri) length pair, columns = |M|
   4. compound, BWA-MEM (no clip), grid = motif1_len x motif2_len (one figure per |M|)
 
 Reads the pre-aggregated tidy CSVs written by aggregate_results.py.
 
+By default only the final-paper subset is emitted: figs 1-2 at the
+trinucleotide motif length (saved under motif_L3/), the (di, tri)
+compound stack (fig 3), and the aggregate line-plot panels (A-D).
+Pass --all-extras to also emit the exploratory outputs: figs 1-2 at
+motif lengths 1 and 2, and the compound BWA-no-clip Lpair grid (fig 4).
+
 Usage::
 
-    python scripts/build_manuscript_figures.py --figs 1 2
-    python scripts/build_manuscript_figures.py --figs 3 4   # after large_transposed lands
-    python scripts/build_manuscript_figures.py --figs all
+    python scripts/build_manuscript_figures.py                # final-paper subset
+    python scripts/build_manuscript_figures.py --all-extras    # + exploratory outputs
+    python scripts/build_manuscript_figures.py --figs 3        # one family only
 """
 from __future__ import annotations
 
@@ -215,8 +221,8 @@ def _save(fig, name, subdir=None):
 
 # ---- figures --------------------------------------------------------------
 
-SINGLE_MOTIF_LEN = 3              # primary motif length for manuscript figs (trinucleotide)
-SINGLE_MOTIF_LENGTHS = [1, 2, 3]  # generate one figure set per length, each to its own subdir
+SINGLE_MOTIF_LEN = 3              # the final-paper motif length (trinucleotide); the only one emitted by default
+SINGLE_MOTIF_LENGTHS = [1, 2, 3]  # full set for --all-extras; each saved to its own motif_L{len}/ subdir
 COMPOUND_L1L2 = (2, 3)   # filter compound aggregate to this (L1, L2)
 
 
@@ -598,7 +604,14 @@ def main():
         help="YAML config; reads output.data_dir.",
     )
     parser.add_argument("--figs", nargs="+", default=["all"],
-                        help="Subset: 1, 2, 3, 4, or 'all'.")
+                        help="Subset: 1, 2, 3, 4, A, or 'all'.")
+    parser.add_argument(
+        "--all-extras", action="store_true",
+        help="Also emit exploratory outputs not in the final paper: "
+             "figs 1-2 at motif lengths 1 and 2, and the compound "
+             "BWA-no-clip Lpair grid (fig 4). Default emits only the "
+             "final-paper subset.",
+    )
     args = parser.parse_args()
     with open(args.config) as f:
         cfg = yaml.safe_load(f)
@@ -612,19 +625,23 @@ def main():
 
     selected = set(args.figs)
     do_all = "all" in selected
+    # Final-paper default emits only motif_L3; --all-extras adds L1, L2.
+    motif_lengths = SINGLE_MOTIF_LENGTHS if args.all_extras else [SINGLE_MOTIF_LEN]
 
     if do_all or "1" in selected:
-        for L in SINGLE_MOTIF_LENGTHS:
+        for L in motif_lengths:
             print(f"=== fig 1 (motif_len = {L}) ===")
             build_fig1(L)
     if do_all or "2" in selected:
-        for L in SINGLE_MOTIF_LENGTHS:
+        for L in motif_lengths:
             print(f"=== fig 2 (N = 10, motif_len = {L}) ===")
             build_fig2(10, L)
     if do_all or "3" in selected:
         print("=== fig 3 ===")
         build_fig3()
-    if do_all or "4" in selected:
+    # fig 4 is an exploratory extra: emitted on a default/all run only with
+    # --all-extras, or when explicitly requested via --figs 4.
+    if "4" in selected or (do_all and args.all_extras):
         for M in [1, 2, 3]:
             print(f"=== fig 4 (|M| = {M}) ===")
             build_fig4(M)

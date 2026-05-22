@@ -31,7 +31,8 @@ allowed contractions (no heuristics.)
 - **Standard alignment modes**: global and semi-global variants supported.
 - **Visualization tools**: plots and inspectors for alignments, DP state, and contractions.
 - **Optional Cython acceleration**: a drop-in fast core for performance-critical use cases.
-- **Educational notebooks**: derivations and interactive experiments.    
+- **Educational notebooks**: derivations and interactive experiments.
+- **Resolves the variation standard aligners miss**: at repeat loci the dominant variation is a change in repeat copy number, which general-purpose short-read aligners (e.g. BWA-MEM) systematically misresolve; NW-flex recovers it by construction — see [Resolving repeat-count variation](#resolving-repeat-count-variation).    
 
 
 ## Installation
@@ -196,6 +197,62 @@ from nwflex.fast import CYTHON_AVAILABLE
 print(CYTHON_AVAILABLE)  # True if compiled
 ```
 
+### Resolving repeat-count variation
+
+At an STR locus, the most common form of variation is a change in the
+number of repeat copies. General-purpose short-read aligners handle this
+poorly: when a read's repeat count differs from the reference, a local
+aligner can score better by clipping at the repeat boundary than by
+spanning the repeat-length indel. NW-flex enumerates repeat-copy changes
+explicitly, so it recovers the correct repeat length by construction.
+
+Notebooks [`07`](notebooks/07_NWflex_BWA_Comparison.ipynb) and
+[`08`](notebooks/08_NWflex_Compound.ipynb) benchmark NW-flex against
+**BWA-MEM** on 150 bp reads simulated from real human STR loci (hg38).
+Every alignment is rescored under a common global (Needleman-Wunsch)
+scheme and counts as correct only if it recovers the true repeat length.
+
+![Single-repeat correctness vs repeat-count difference](docs/images/A__delta.png)
+
+*Single-repeat correct-length rate as the haplotype's count departs from
+the reference by Δ. NW-flex stays at 100% across the sweep; BWA-MEM
+degrades with |Δ| — sharply at default parameters, and still imperfect
+with soft-clipping suppressed, especially for contractions (Δ < 0).*
+
+The gap is starkest for **compound** repeats — two adjacent motifs whose
+counts vary independently:
+
+![Compound-repeat correctness across the (Δ₁, Δ₂) grid](docs/images/perf_heatmap_compound.png)
+
+*Correctness over the (Δ₁, Δ₂) grid; each cell is split (square = forward
+strand, circle = reverse complement). NW-flex (right) is correct across
+the grid; BWA-MEM (left, center) only near Δ = 0.*
+
+On the manuscript's locus panel, BWA-MEM at default parameters recovers
+the correct repeat length for 69–75% of single-repeat reads at the
+largest differences tested (|Δ| = 5), dropping to 21% for compound reads
+at the shortest bridge, while NW-flex stays at 100% throughout. Full
+methodology and per-test results are in the notebooks and the
+[preprint](https://doi.org/10.64898/2025.12.22.695990).
+
+### Reproducing performance figures
+
+The performance figures are regenerated from the simulation pipeline
+(needs `bwa` and `samtools` on `PATH`):
+
+```bash
+# 1. Run the parametric sweeps
+python scripts/run_batch_sweep.py --config scripts/configs/single_repeat.yaml
+python scripts/run_batch_sweep.py --config scripts/configs/compound.yaml
+
+# 2. Aggregate across loci
+python scripts/aggregate_results.py         --config scripts/configs/single_repeat.yaml
+python scripts/aggregate_per_locus_for_A.py --config scripts/configs/single_repeat.yaml
+
+# 3. Render the figures (default subset; --all-extras for exploratory variants)
+python scripts/build_manuscript_figures.py
+```
+
 ### Optional Dependencies
 
 ```bash
@@ -328,8 +385,9 @@ nwflex/
 │   ├── simulation/    # NW-flex vs BWA-MEM simulation harness
 │   └── _cython/       # Cython source
 ├── notebooks/         # Educational + manuscript notebooks
-├── scripts/           # Sweep coordinator, aggregators, figure + table builders
-├── supplement/        # Sweep shards, aggregate CSVs, manuscript figures and tables
+├── scripts/           # Sweep coordinator, aggregators, manuscript-figure builder
+├── supplement/        # Generated sweep outputs and figures (gitignored; not tracked)
+├── docs/images/       # README figures
 └── tests/             # pytest test suite
 ```
 

@@ -1268,7 +1268,6 @@ def alignment_state(
         return "M"
     return "T"
 
-
 _STATE_PRIORITY = {"P": 0, "T": 1, "M": 2, "D": 3}
 
 _STATE_GLYPHS = {
@@ -1616,4 +1615,3 @@ def alignment_state_multi(
     if chosen_score < truth_score:
         return "M"
     return "T"
-

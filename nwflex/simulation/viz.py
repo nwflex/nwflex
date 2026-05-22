@@ -408,7 +408,6 @@ def plot_layout_schematic(
                     fontsize=label_size - 1, style="italic", color="#444444")
     return fig
 
-
 def _draw_schematic(ax, *, schematic: Mapping, fontsize: int) -> None:
     """
     Draw the explainer banner: a Reference row on top, a Haplotype row
@@ -2337,4 +2336,3 @@ def plot_compound_layout_schematic(
                     ha="center", va="bottom",
                     fontsize=label_size - 1, style="italic", color="#444444")
     return fig
-
