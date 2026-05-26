@@ -6,6 +6,9 @@
     ((( super() )))
     % Load fancyvrb options for smaller code
     \usepackage{fvextra}
+    % Workaround for pandoc 3.9 + TeX Live 2025 longtable: pandoc emits
+    % \def\LTcaptype{none}, but current longtable needs a real counter.
+    \newcounter{none}
 ((*- endblock packages -*))
 
 ((*- block definitions -*))

@@ -1,0 +1,38 @@
+# Single-repeat sweep — every panel locus × Δ × N × SNV slot.
+#
+# Writes one tidy-frame CSV shard per (locus, N, snv_offset) task to
+# supplement/data/single_repeat/.  Roughly 6,899 loci × 3 N values
+# × 5 SNV slots ≈ 103,000 shards.
+#
+# Usage:
+#   python scripts/run_batch_sweep.py --config scripts/configs/single_repeat.yaml --workers 56
+
+seed: 20260512
+
+panel: data/hg38_motif_sample_K100.tsv
+
+single_repeat:
+  motif_lengths: [1, 2, 3]
+  loci_per_length: 6000       # exceeds every per-length pool, so the
+                              # selector exhausts each pool and yields
+                              # ALL panel loci (~6,899 after filtering)
+  N_values: [5, 10, 20]
+  delta_range: [-5, 5]
+  snv_positions: [null, 0, 1, 4, 9]   # null = no SNV; 1-indexed positions: none, 1, 2, 5, 10
+  read_len: 150
+  k_min_flank: 1
+
+compound:
+  motif_length_pairs: []      # empty -> compound section produces 0 tasks
+  pairs_per_length_pair: 0
+  N_pairs: []
+  bridge_lengths: []
+  delta1_range: [-5, 5]
+  delta2_range: [-5, 5]
+  read_len: 150
+  k_min_flank: 1
+
+output:
+  data_dir: supplement/data
+  figures_dir: supplement/figures
+  tables_dir: supplement/tables

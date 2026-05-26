@@ -47,6 +47,10 @@ from .default import (
     SCORE_MATRIX,
     GAP_OPEN,
     GAP_EXTEND,
+    PRESETS,
+    ScoringPreset,
+    make_dna_score_matrix,
+    get_preset,
     align_params,
     get_default_scoring,
 )
@@ -177,6 +181,10 @@ __all__ = [
     # Default scoring
     "get_default_scoring",
     "align_params",
+    "PRESETS",
+    "ScoringPreset",
+    "make_dna_score_matrix",
+    "get_preset",
     # Validation
     "nwg_global",
     "sflex_naive",
