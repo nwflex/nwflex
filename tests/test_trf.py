@@ -1,8 +1,8 @@
 # test_trf.py
 #
 # Tests for nwflex.trf — TRF parsing, isolation annotation, filtering,
-# and panel construction. Uses the small chr21 snippet fixture
-# in data/chr21_snippet.dat (10 rows).
+# and panel construction. Uses the chr21 snippet fixture in
+# data/chr21_snippet_demo.dat.
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from nwflex.trf import (
 
 
 REPO_DATA = Path(__file__).resolve().parent.parent / "data"
-TRF_DAT = REPO_DATA / "chr21_snippet.dat"
+TRF_DAT = REPO_DATA / "chr21_snippet_demo.dat"
 
 
 # ============================================================================
@@ -31,12 +31,18 @@ TRF_DAT = REPO_DATA / "chr21_snippet.dat"
 # ============================================================================
 
 class TestParseTrfDat:
+    EXPECTED_COLUMNS = {
+        "chrom", "start", "end", "period_size", "copy_number",
+        "consensus_size", "pct_matches", "pct_indels", "score",
+        "pct_A", "pct_C", "pct_G", "pct_T", "entropy",
+        "consensus_pattern", "repeat_sequence",
+    }
+
     def test_basic_shape(self):
         df = parse_trf_dat(TRF_DAT)
         assert isinstance(df, pd.DataFrame)
-        assert len(df) == 10
-        # 15 TRF columns + chrom prefix.
-        assert "chrom" in df.columns
+        assert len(df) > 0
+        assert self.EXPECTED_COLUMNS <= set(df.columns)
         for col in ("start", "end", "period_size", "consensus_size", "score"):
             assert df[col].dtype.kind == "i"
         for col in ("copy_number", "pct_matches", "pct_indels", "entropy"):
@@ -47,15 +53,22 @@ class TestParseTrfDat:
         assert (df["chrom"] == "chr21").all()
 
     def test_start_is_zero_based(self):
-        # First fixture line: TRF emits 1-based start 5016248 -> 0-based 5016247.
+        # A known TRF record: 1-based start 5016248 → 0-based 5016247.
         df = parse_trf_dat(TRF_DAT)
-        assert df.iloc[0]["start"] == 5016247
-        assert df.iloc[0]["end"] == 5016270
+        rec = df[df["start"] == 5016247]
+        assert len(rec) == 1
+        assert rec.iloc[0]["end"] == 5016270
 
     def test_repeat_sequence_preserved(self):
         df = parse_trf_dat(TRF_DAT)
-        assert df.iloc[3]["repeat_sequence"] == "GGGGGGGGGG"  # the mono-G run
-        assert df.iloc[3]["period_size"] == 1
+        mono_g = df[df["repeat_sequence"] == "GGGGGGGGGG"]
+        assert len(mono_g) >= 1
+        assert (mono_g["period_size"] == 1).all()
+
+    def test_consensus_size_matches_consensus_pattern_length(self):
+        """Schema invariant: each row's consensus_pattern length equals consensus_size."""
+        df = parse_trf_dat(TRF_DAT)
+        assert (df["consensus_pattern"].str.len() == df["consensus_size"]).all()
 
     def test_missing_file_raises(self):
         with pytest.raises(FileNotFoundError):
@@ -91,11 +104,30 @@ class TestAnnotateRepeatIsolation:
             annotate_repeat_isolation(df, {"chrFOO": 1000})
 
     def test_overlapping_repeat_has_higher_coverage(self):
-        # The fixture has a long repeat (row 8) that engulfs row 9.
-        # After annotation, the engulfed repeat should have start_cover > 1.
+        """Engulfed repeat must register start_cover >= 2.
+
+        `start_cover` is computed by a sweep-line over all repeat intervals:
+        for each coordinate c, it counts how many intervals [start, end) are
+        open at c. A repeat with no neighbours has start_cover == 1 (itself);
+        an engulfed repeat has start_cover >= 2 (itself + each engulfer).
+
+        Fixture geometry the assertion relies on:
+
+            5017612 ──────────── long repeat ──────────── 5017782
+                                5017756 ── short ── 5017768
+
+        The short repeat at start=5017756 sits entirely inside the long
+        repeat [5017612, 5017782), so at coord 5017756 both intervals are
+        open and start_cover for the short repeat is 2.
+
+        What breaks if removed: `start_cover` is the foundation of
+        `filter_isolated_repeats` (default keeps only start_cover == 1).
+        An off-by-one in the cum_start - cum_end sweep, wrong tie-break
+        on coincident coords, or boundary inclusive/exclusive confusion
+        would silently let engulfed repeats through the filter.
+        """
         df = parse_trf_dat(TRF_DAT)
         ann = annotate_repeat_isolation(df, {"chr21": 50_000_000})
-        # Row at start=5017756 sits inside the [5017612, 5017782) repeat.
         engulfed = ann[ann["start"] == 5017756]
         assert len(engulfed) == 1
         assert engulfed.iloc[0]["start_cover"] >= 2
@@ -139,10 +171,10 @@ class TestFilterIsolatedRepeats:
         ann = self._annotated()
         out = filter_isolated_repeats(ann, min_dist=0)
         # Mutating the result must not affect the input.
-        if len(out) > 0:
-            out_index = out.index[0]
-            out.loc[out_index, "start"] = -1
-            assert ann.loc[out_index, "start"] != -1
+        assert len(out) > 0
+        out_index = out.index[0]
+        out.loc[out_index, "start"] = -1
+        assert ann.loc[out_index, "start"] != -1
 
 
 # ============================================================================
